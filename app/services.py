@@ -16,7 +16,7 @@ async def call_openrouter(messages: list):
     }
 
     payload = {
-        "model": "deepseek/deepseek-r1-0528:free",  # You can change model here anytime
+        "model": "openai/gpt-4o-mini",  # You can change model here anytime
         "messages": messages
     }
 
