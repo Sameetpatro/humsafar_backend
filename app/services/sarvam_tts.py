@@ -20,7 +20,7 @@ MAX_TTS_CHARS  = 500
 async def synthesize(
     text:          str,
     language_code: str,   # BCP-47
-    speaker:       str = "meera",
+    speaker:       str = "anushka",  # default
 ) -> bytes:
     """
     Converts text to speech via Sarvam TTS. Returns raw WAV bytes.
@@ -31,7 +31,7 @@ async def synthesize(
       Body:
         inputs               — list[str] (we send one element)
         target_language_code — BCP-47
-        speaker              — "meera" | "pavithra" | "arvind" | "amol" etc.
+        speaker              — "anushka" | "pavithra" | "arvind" | "amol" etc.
         pitch                — 0
         pace                 — 1.05  (slightly faster — better UX for voice assistants)
         loudness             — 1.5
@@ -69,7 +69,7 @@ async def synthesize(
                 "loudness":             1.5,
                 "speech_sample_rate":   16000,
                 "enable_preprocessing": True,
-                "model":                "bulbul:v1",
+                "model":                "bulbul:v3",
             }
         )
 
