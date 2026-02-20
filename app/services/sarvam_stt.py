@@ -45,7 +45,7 @@ async def transcribe(
             files={"file": ("recording.wav", audio_bytes, "audio/wav")},
             data={
                 "language_code":    language_code,
-                "model":            "saarika:v1",
+                "model":            "saarika:v2.5",
                 "with_timestamps":  "false",
             }
         )
