@@ -13,7 +13,7 @@ TTS_TIMEOUT    = 30.0
 MAX_TTS_CHARS  = 500
 
 TTS_MODEL      = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
-TTS_SPEAKER    = os.getenv("SARVAM_TTS_SPEAKER", "anushka")
+TTS_SPEAKER    = os.getenv("SARVAM_TTS_SPEAKER", "ritu")
 
 
 async def synthesize(
