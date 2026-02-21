@@ -1,9 +1,11 @@
 # app/routers/video.py
-# FIXED:
-#   - Placeholder image now created inside tempdir — FFmpeg can always find it
-#   - image_paths resolved to absolute paths before passing to _run_ffmpeg
-#   - _run_ffmpeg writes concat list using the actual abs paths of images
-#   - No more "Impossible to open" errors
+# CHANGES vs previous:
+#   + After FFmpeg writes the output file, it is uploaded to Supabase Storage
+#   + Local file is deleted immediately after a successful upload
+#   + /video-status/{hash} returns the Supabase public URL
+#   + DELETE /delete-video/{hash} removes the file from Supabase Storage
+#   + On-startup existence check uses Supabase instead of local filesystem
+#   + All other video generation logic (FFmpeg, images, narration) is UNCHANGED
 
 import asyncio
 import hashlib
@@ -17,11 +19,18 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel
 
+from app.services.supabase_storage import (
+    delete_video   as supabase_delete,
+    upload_video   as supabase_upload,
+    video_exists   as supabase_exists,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["video"])
 
 # ── Path configuration ────────────────────────────────────────────────────────
+# PROMPT_DIR is kept only as a temp landing zone; files are deleted after upload.
 STATIC_DIR   = Path("static/videos")
 OVERVIEW_DIR = STATIC_DIR / "overview"
 PROMPT_DIR   = STATIC_DIR / "prompt"
@@ -54,6 +63,12 @@ class VideoStatusResponse(BaseModel):
     message:  str = ""
 
 
+class DeleteVideoResponse(BaseModel):
+    hash:    str
+    deleted: bool
+    message: str = ""
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_hash(prompt: str, bot_text: str, site_id: str) -> str:
@@ -61,38 +76,27 @@ def _make_hash(prompt: str, bot_text: str, site_id: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
 
-def _video_url(subpath: str) -> str:
-    base = os.getenv("BASE_URL", "https://humsafar-backend-59ic.onrender.com")
-    return f"{base}/static/videos/{subpath}"
-
-
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/video-status/{id_or_hash}", response_model=VideoStatusResponse)
 async def get_video_status(id_or_hash: str):
-    prompt_path = PROMPT_DIR / f"{id_or_hash}.mp4"
-    if prompt_path.exists():
-        return VideoStatusResponse(
-            status="ready",
-            url=_video_url(f"prompt/{id_or_hash}.mp4"),
-            progress=100
-        )
-
-    overview_path = OVERVIEW_DIR / f"{id_or_hash}.mp4"
-    if overview_path.exists():
-        return VideoStatusResponse(
-            status="ready",
-            url=_video_url(f"overview/{id_or_hash}.mp4"),
-            progress=100
-        )
-
+    # 1. Check in-memory state first (covers actively generating / recently failed)
     state = _generation_state.get(id_or_hash)
     if state:
         return VideoStatusResponse(
             status=state["status"],
             progress=state.get("progress", 0),
             message=state.get("message", ""),
-            url=state.get("url")
+            url=state.get("url"),
+        )
+
+    # 2. Fall back to Supabase existence check (survives server restarts)
+    supabase_url = await supabase_exists(id_or_hash)
+    if supabase_url:
+        return VideoStatusResponse(
+            status="ready",
+            url=supabase_url,
+            progress=100,
         )
 
     return VideoStatusResponse(status="not_started", progress=0)
@@ -102,18 +106,19 @@ async def get_video_status(id_or_hash: str):
 async def generate_video(req: GenerateVideoRequest, background_tasks: BackgroundTasks):
     video_hash = _make_hash(req.prompt, req.bot_text, req.site_id)
 
-    prompt_path = PROMPT_DIR / f"{video_hash}.mp4"
-    if prompt_path.exists():
-        logger.info(f"[video] Cache hit for hash={video_hash}")
+    # 1. Check Supabase for an already-generated video (cache hit)
+    supabase_url = await supabase_exists(video_hash)
+    if supabase_url:
+        logger.info(f"[video] Supabase cache hit for hash={video_hash}")
         return GenerateVideoResponse(
             hash=video_hash,
             status="ready",
-            url=_video_url(f"prompt/{video_hash}.mp4")
+            url=supabase_url,
         )
 
+    # 2. Check in-memory state
     if video_hash in _generation_state:
         state = _generation_state[video_hash]
-        # If previously failed, reset and retry
         if state["status"] == "failed":
             logger.info(f"[video] Retrying failed hash={video_hash}")
             del _generation_state[video_hash]
@@ -121,7 +126,7 @@ async def generate_video(req: GenerateVideoRequest, background_tasks: Background
             return GenerateVideoResponse(
                 hash=video_hash,
                 status=state["status"],
-                url=state.get("url")
+                url=state.get("url"),
             )
 
     _generation_state[video_hash] = {"status": "generating", "progress": 0}
@@ -131,11 +136,45 @@ async def generate_video(req: GenerateVideoRequest, background_tasks: Background
         prompt=req.prompt,
         bot_text=req.bot_text,
         site_name=req.site_name,
-        site_id=req.site_id
+        site_id=req.site_id,
     )
 
     logger.info(f"[video] Generation enqueued — hash={video_hash} site={req.site_name}")
     return GenerateVideoResponse(hash=video_hash, status="generating")
+
+
+@router.delete("/delete-video/{video_hash}", response_model=DeleteVideoResponse)
+async def delete_video_endpoint(video_hash: str):
+    """
+    Deletes a generated video from Supabase Storage.
+    Also clears the in-memory generation state if present.
+    """
+    logger.info(f"[video] DELETE request — hash={video_hash}")
+
+    try:
+        deleted = await supabase_delete(video_hash)
+    except RuntimeError as exc:
+        logger.error(f"[video] Supabase delete error: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        )
+
+    # Clean up in-memory state regardless
+    _generation_state.pop(video_hash, None)
+
+    if deleted:
+        return DeleteVideoResponse(
+            hash=video_hash,
+            deleted=True,
+            message="Video deleted from Supabase Storage",
+        )
+    else:
+        return DeleteVideoResponse(
+            hash=video_hash,
+            deleted=False,
+            message="Video not found in Supabase Storage (may have already been deleted)",
+        )
 
 
 # ── Background task ───────────────────────────────────────────────────────────
@@ -145,33 +184,34 @@ async def _generate_video_task(
     prompt: str,
     bot_text: str,
     site_name: str,
-    site_id: str
+    site_id: str,
 ):
     def _update(progress: int, message: str = ""):
         _generation_state[video_hash] = {
             "status":   "generating",
             "progress": progress,
-            "message":  message
+            "message":  message,
         }
         logger.info(f"[video/{video_hash}] {progress}% — {message}")
+
+    local_output_path = PROMPT_DIR / f"{video_hash}.mp4"
 
     try:
         _update(5, "Analyzing content…")
         await asyncio.sleep(0.3)
 
-        # Stage 1: TTS narration
+        # Stage 1: TTS narration (UNCHANGED)
         _update(10, "Generating narration…")
         narration_bytes = await _generate_narration(bot_text)
         _update(40, "Narration ready")
 
-        # Stage 2: Images — returns absolute resolved paths
+        # Stage 2: Images (UNCHANGED)
         _update(45, "Crafting cinematic scenes…")
         image_paths = await _fetch_monument_images(site_id, site_name)
         _update(60, "Scenes composed")
 
-        # Stage 3: FFmpeg — runs in executor, never blocks event loop
+        # Stage 3: FFmpeg (UNCHANGED)
         _update(65, "Adding narration & visuals…")
-        output_path = PROMPT_DIR / f"{video_hash}.mp4"
 
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -180,29 +220,55 @@ async def _generate_video_task(
                 _run_ffmpeg,
                 image_paths,
                 narration_bytes,
-                str(output_path.resolve())   # always absolute
+                str(local_output_path.resolve()),
             )
 
-        _update(95, "Finalizing…")
+        _update(80, "Uploading to cloud storage…")
 
-        if not output_path.exists():
+        if not local_output_path.exists():
             raise RuntimeError("FFmpeg completed but output file is missing")
 
+        # Stage 4: Upload to Supabase ────────────────────────────────────────
+        try:
+            public_url = await supabase_upload(
+                local_path=str(local_output_path.resolve()),
+                video_hash=video_hash,
+            )
+        except RuntimeError as upload_exc:
+            # Upload failure is non-recoverable; mark as failed
+            raise RuntimeError(f"Storage upload failed: {upload_exc}") from upload_exc
+
+        # Stage 5: Delete local file immediately after upload ────────────────
+        try:
+            local_output_path.unlink(missing_ok=True)
+            logger.info(f"[video/{video_hash}] Local file removed after upload")
+        except OSError as rm_exc:
+            # Non-fatal — log and continue; Render will evict it anyway
+            logger.warning(f"[video/{video_hash}] Could not remove local file: {rm_exc}")
+
+        _update(100, "")
         _generation_state[video_hash] = {
             "status":   "ready",
             "progress": 100,
-            "url":      _video_url(f"prompt/{video_hash}.mp4")
+            "url":      public_url,
         }
-        logger.info(f"[video/{video_hash}] Generation complete ✓")
+        logger.info(f"[video/{video_hash}] Generation complete ✓ → {public_url}")
 
     except Exception as exc:
         logger.error(f"[video/{video_hash}] Generation FAILED: {exc}", exc_info=True)
+        # Clean up local file if it exists
+        try:
+            local_output_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         _generation_state[video_hash] = {
             "status":   "failed",
             "progress": 0,
-            "message":  str(exc)
+            "message":  str(exc),
         }
 
+
+# ── Unchanged helpers (verbatim from original) ────────────────────────────────
 
 async def _generate_narration(text: str) -> bytes:
     from app.services.sarvam_tts import synthesize
@@ -222,8 +288,6 @@ async def _fetch_monument_images(site_id: str, site_name: str) -> list[str]:
             logger.info(f"[video] Using {len(abs_paths)} images from {images_dir}")
             return abs_paths
 
-    # FIX: write placeholder to a persistent location (not inside a tempdir)
-    # so the absolute path stays valid when FFmpeg reads the concat list.
     placeholder_dir = Path("static/images/_placeholder")
     placeholder_dir.mkdir(parents=True, exist_ok=True)
     placeholder = placeholder_dir / "blank.jpg"
@@ -239,8 +303,6 @@ async def _fetch_monument_images(site_id: str, site_name: str) -> list[str]:
 
 def _create_placeholder_jpeg(path: str):
     """Write a minimal valid black 1×1 JPEG — no Pillow required."""
-    # This is a complete, valid 1×1 black JPEG (JFIF format).
-    # Generated offline and embedded as bytes — zero dependencies.
     minimal_black_jpeg = bytes([
         0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
         0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
@@ -278,18 +340,13 @@ def _create_placeholder_jpeg(path: str):
 def _run_ffmpeg(image_paths: list[str], audio_bytes: bytes, output_path: str):
     """
     Synchronous FFmpeg call — always runs in ThreadPoolExecutor.
-
-    FIX: Everything is written inside a fresh tempdir.
-         image_paths are already absolute, so the concat list references
-         them correctly regardless of where tempdir lives.
+    UNCHANGED from original.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        # Write audio to temp
         audio_path = os.path.join(tmp, "narration.wav")
         with open(audio_path, "wb") as f:
             f.write(audio_bytes)
 
-        # Get audio duration
         try:
             probe = subprocess.run(
                 ["ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -304,13 +361,11 @@ def _run_ffmpeg(image_paths: list[str], audio_bytes: bytes, output_path: str):
         num_images = len(image_paths)
         duration_per_image = max(total_duration / num_images, 2.0)
 
-        # Write concat list — image_paths are absolute so -safe 0 is enough
         concat_list = os.path.join(tmp, "images.txt")
         with open(concat_list, "w") as f:
             for img_path in image_paths:
                 f.write(f"file '{img_path}'\n")
                 f.write(f"duration {duration_per_image:.2f}\n")
-            # FFmpeg concat requires the last entry without duration
             f.write(f"file '{image_paths[-1]}'\n")
 
         logger.info(
@@ -333,13 +388,12 @@ def _run_ffmpeg(image_paths: list[str], audio_bytes: bytes, output_path: str):
             "-movflags", "+faststart",
             "-shortest",
             "-r", "30",
-            output_path
+            output_path,
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
         if result.returncode != 0:
-            # Log the last 2000 chars of stderr for diagnosis
             stderr_tail = result.stderr[-2000:]
             logger.error(f"[ffmpeg] FAILED (exit {result.returncode}):\n{stderr_tail}")
             raise RuntimeError(f"FFmpeg exit {result.returncode}:\n{stderr_tail}")
