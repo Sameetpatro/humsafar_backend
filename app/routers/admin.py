@@ -1,6 +1,6 @@
 import os
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
@@ -10,12 +10,8 @@ from app.models import HeritageSite, SiteImage, Node, NodeImage, Recommendation
 
 logger = logging.getLogger(__name__)
 
-ADMIN_SECRET = os.getenv("ADMIN_SECRET", "your_secret_here")
-
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
-
-# ── Pydantic schemas for seed payload ────────────────────────────────────────
 
 class SitePayload(BaseModel):
     name: str
@@ -60,18 +56,11 @@ class SeedBulkRequest(BaseModel):
     landmarks: Optional[LandmarksPayload] = None
 
 
-# ── Endpoint ─────────────────────────────────────────────────────────────────
-
 @router.post("/seed-bulk")
 def seed_bulk(
     payload: SeedBulkRequest,
     db: Session = Depends(get_db),
-    x_admin_secret: Optional[str] = Header(None),
 ):
-    if x_admin_secret != ADMIN_SECRET:
-        raise HTTPException(status_code=401, detail="Unauthorized — invalid admin secret")
-
-    # ── 1. Create HeritageSite ────────────────────────────────────────────
     site = HeritageSite(
         name=payload.site.name,
         latitude=payload.site.latitude,
@@ -85,14 +74,12 @@ def seed_bulk(
         fun_facts=payload.site.fun_facts,
     )
     db.add(site)
-    db.flush()  # get site.id before committing
+    db.flush()
 
-    # ── 2. Site images ────────────────────────────────────────────────────
     for order, url in enumerate(payload.site.images):
         if url:
             db.add(SiteImage(site_id=site.id, image_url=url, display_order=order))
 
-    # ── 3. Nodes ──────────────────────────────────────────────────────────
     for node_data in payload.nodes:
         node = Node(
             site_id=site.id,
@@ -105,13 +92,12 @@ def seed_bulk(
             video_url=node_data.video_url,
         )
         db.add(node)
-        db.flush()  # get node.id
+        db.flush()
 
         for order, url in enumerate(node_data.images):
             if url:
                 db.add(NodeImage(node_id=node.id, image_url=url, display_order=order))
 
-    # ── 4. Landmarks / Recommendations ───────────────────────────────────
     if payload.landmarks:
         type_map = {
             "monument": payload.landmarks.monuments,
