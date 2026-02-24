@@ -1,11 +1,5 @@
-# app/main.py  — humsafar-backend (reverted, stable)
-# Handles: /chat, /voice-chat
-# Proxies: /generate-video → video-service, /video-status → video-service
-# Does NOT run FFmpeg, generate video, or upload to Supabase.
-
 import logging
 from dotenv import load_dotenv
-
 load_dotenv()
 
 from fastapi import FastAPI
@@ -14,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.models   import ChatRequest, ChatResponse
 from app.services import call_openrouter
 from app.routers  import voice as voice_router
-from app.routers  import video_proxy as video_proxy_router
 
 logging.basicConfig(
     level   = logging.INFO,
@@ -22,22 +15,17 @@ logging.basicConfig(
     datefmt = "%H:%M:%S",
 )
 
-app = FastAPI(title="Humsafar API", version="4.0.0")
+app = FastAPI(title="Humsafar Backend", version="5.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins     = ["*"],
-    allow_credentials = True,
-    allow_methods     = ["*"],
-    allow_headers     = ["*"],
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
 )
 
-# ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(voice_router.router)
-app.include_router(video_proxy_router.router)
 
 
-# ── /chat (unchanged) ─────────────────────────────────────────────────────────
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     system_prompt = f"""
@@ -51,12 +39,18 @@ async def chat(req: ChatRequest):
     - Do not hallucinate unknown facts.
     """
     messages  = [{"role": "system", "content": system_prompt}]
-    messages += req.history
+    messages += [{"role": m.role, "content": m.content} for m in req.history]
     messages.append({"role": "user", "content": req.message})
+
     reply = await call_openrouter(messages)
     return ChatResponse(reply=reply)
 
 
 @app.get("/health")
 async def health():
+    return {"status": "ok", "service": "humsafar-backend"}
+
+
+@app.get("/")
+async def root():
     return {"status": "ok", "service": "humsafar-backend"}
