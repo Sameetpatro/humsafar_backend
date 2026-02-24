@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
 
+
 class HeritageSite(Base):
     __tablename__ = "heritage_sites"
 
@@ -52,9 +53,23 @@ class Node(Base):
     qr_code_value = Column(String, unique=True)
 
     description = Column(Text)
-    image_url = Column(String)
+    video_url = Column(String)        # ← added (was missing)
+    image_url = Column(String)        # kept for backward compat
 
     site = relationship("HeritageSite", back_populates="nodes")
+    images = relationship("NodeImage", back_populates="node")  # ← added
+
+
+class NodeImage(Base):
+    """Multiple images per node — mirrors SiteImage pattern."""
+    __tablename__ = "node_images"
+
+    id = Column(Integer, primary_key=True, index=True)
+    node_id = Column(Integer, ForeignKey("nodes.id"))
+    image_url = Column(String)
+    display_order = Column(Integer)
+
+    node = relationship("Node", back_populates="images")
 
 
 class Trip(Base):
@@ -73,7 +88,7 @@ class Recommendation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     site_id = Column(Integer)
-    type = Column(String)  # hotel, restaurant, nearby
+    type = Column(String)   # monument | restaurant | hotel
     name = Column(String)
     description = Column(Text)
     latitude = Column(Float)
