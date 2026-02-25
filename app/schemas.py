@@ -41,6 +41,8 @@ class VoiceChatResponse(BaseModel):
 class NearbySiteResponse(BaseModel):
     id:              int
     name:            str
+    latitude:        float    
+    longitude:       float    
     distance_meters: float
     inside_geofence: bool
 
