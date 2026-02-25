@@ -48,6 +48,7 @@ class Node(Base):
     name = Column(String)
     latitude = Column(Float)
     longitude = Column(Float)
+    is_king = Column(Boolean, default=False)
     sequence_order = Column(Integer)
 
     qr_code_value = Column(String, unique=True)
