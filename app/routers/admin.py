@@ -1,9 +1,10 @@
 # app/routers/admin.py
 import logging
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
+
 
 from app.database import get_db
 from app.models import HeritageSite, SiteImage, Node, NodeImage, Recommendation, Prompt
@@ -58,6 +59,15 @@ class SeedPromptRequest(BaseModel):
 
 @router.post("/seed-bulk")
 def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
+
+    # 🔥 Enforce exactly ONE king node
+    king_count = sum(1 for n in payload.nodes if getattr(n, "is_king", False))
+    if king_count != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Exactly ONE king node must be defined per site."
+        )
+
     site = HeritageSite(
         name=payload.site.name,
         latitude=payload.site.latitude,
@@ -84,49 +94,39 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
             latitude=node_data.latitude,
             longitude=node_data.longitude,
             sequence_order=node_data.sequence,
+            is_king=getattr(node_data, "is_king", False),
             qr_code_value=node_data.qr,
             description=node_data.description,
             video_url=node_data.video_url,
         )
         db.add(node)
         db.flush()
+
         for order, url in enumerate(node_data.images):
             if url:
                 db.add(NodeImage(node_id=node.id, image_url=url, display_order=order))
 
     if payload.landmarks:
-        for ltype, items in {"monument": payload.landmarks.monuments, "restaurant": payload.landmarks.restaurants, "hotel": payload.landmarks.hotels}.items():
+        for ltype, items in {
+            "monument": payload.landmarks.monuments,
+            "restaurant": payload.landmarks.restaurants,
+            "hotel": payload.landmarks.hotels
+        }.items():
             for item in items:
                 if item.name:
-                    db.add(Recommendation(site_id=site.id, type=ltype, name=item.name, latitude=item.latitude, longitude=item.longitude))
+                    db.add(Recommendation(
+                        site_id=site.id,
+                        type=ltype,
+                        name=item.name,
+                        latitude=item.latitude,
+                        longitude=item.longitude
+                    ))
 
     db.commit()
-    logger.info(f"[seed-bulk] Created site '{site.name}' id={site.id}")
-    return {"success": True, "site_id": site.id, "site_name": site.name, "nodes_created": len(payload.nodes)}
 
-
-@router.post("/seed-prompt")
-def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
-    """
-    Upsert heritage context text for the SHREE chatbot.
-    Omit node_id for a site-level prompt (used as fallback for all nodes).
-    Include node_id for a node-specific prompt (overrides site-level when at that node).
-    """
-    existing = db.query(Prompt).filter(
-        Prompt.site_id == payload.site_id,
-        Prompt.node_id == payload.node_id,
-    ).first()
-    if existing:
-        existing.context_prompt_text = payload.prompt_text
-        db.commit()
-        return {"success": True, "action": "updated", "site_id": payload.site_id, "node_id": payload.node_id}
-    db.add(Prompt(site_id=payload.site_id, node_id=payload.node_id, context_prompt_text=payload.prompt_text))
-    db.commit()
-    return {"success": True, "action": "created", "site_id": payload.site_id, "node_id": payload.node_id}
-
-
-@router.get("/prompts/{site_id}")
-def list_prompts(site_id: int, db: Session = Depends(get_db)):
-    """Debug: list all seeded prompts for a site."""
-    prompts = db.query(Prompt).filter(Prompt.site_id == site_id).all()
-    return [{"id": p.id, "node_id": p.node_id, "preview": p.context_prompt_text[:120] + "..."} for p in prompts]
+    return {
+        "success": True,
+        "site_id": site.id,
+        "site_name": site.name,
+        "nodes_created": len(payload.nodes)
+    }

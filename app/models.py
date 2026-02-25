@@ -1,8 +1,7 @@
-from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey, Boolean, DateTime, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
-
 
 class HeritageSite(Base):
     __tablename__ = "heritage_sites"
@@ -48,21 +47,30 @@ class Node(Base):
     name = Column(String)
     latitude = Column(Float)
     longitude = Column(Float)
-    is_king = Column(Boolean, default=False)
+
+    is_king = Column(Boolean, default=False, nullable=False)
     sequence_order = Column(Integer)
 
     qr_code_value = Column(String, unique=True)
 
     description = Column(Text)
-    video_url = Column(String)        # ← added (was missing)
-    image_url = Column(String)        # kept for backward compat
+    video_url = Column(String)
+    image_url = Column(String)
 
     site = relationship("HeritageSite", back_populates="nodes")
-    images = relationship("NodeImage", back_populates="node")  # ← added
+    images = relationship("NodeImage", back_populates="node")
+
+    __table_args__ = (
+        Index(
+            "unique_king_per_site",
+            "site_id",
+            unique=True,
+            postgresql_where=(is_king == True)
+        ),
+    )
 
 
 class NodeImage(Base):
-    """Multiple images per node — mirrors SiteImage pattern."""
     __tablename__ = "node_images"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -89,7 +97,7 @@ class Recommendation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     site_id = Column(Integer)
-    type = Column(String)   # monument | restaurant | hotel
+    type = Column(String)
     name = Column(String)
     description = Column(Text)
     latitude = Column(Float)

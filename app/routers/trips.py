@@ -15,36 +15,29 @@ router = APIRouter(prefix="/trips", tags=["Trips"])
 
 @router.post("/start")
 def start_trip(user_id: str, qr_value: str, db: Session = Depends(get_db)):
-    """
-    Start a trip by scanning a King Node QR code.
-    user_id is a string so guest IDs like 'guest_user_001' are accepted.
-    """
+
     node = db.query(Node).filter(Node.qr_code_value == qr_value).first()
 
     if not node:
         raise HTTPException(status_code=400, detail="Invalid QR Code")
 
-    # Must be king node (sequence_order = 0)
-    if node.sequence_order != 0:
+    if not node.is_king:
         raise HTTPException(
             status_code=400,
-            detail=f"Node '{node.name}' is not a King Node (sequence_order={node.sequence_order}). "
+            detail=f"Node '{node.name}' is not a King Node. "
                    f"Scan the main entrance QR to start a trip."
         )
 
-    # Store user_id as string in the Trip.
-    # Trip.user_id is Integer in the ORM — cast gracefully.
-    # For guest users we store 0; for real users store their numeric ID.
     try:
         uid_int = int(user_id)
     except (ValueError, TypeError):
-        uid_int = 0   # guest / non-numeric user
+        uid_int = 0
 
     trip = Trip(
-        user_id    = uid_int,
-        site_id    = node.site_id,
-        started_at = datetime.utcnow(),
-        is_active  = True,
+        user_id=uid_int,
+        site_id=node.site_id,
+        started_at=datetime.utcnow(),
+        is_active=True,
     )
 
     db.add(trip)
@@ -52,7 +45,6 @@ def start_trip(user_id: str, qr_value: str, db: Session = Depends(get_db)):
     db.refresh(trip)
 
     return {"message": "Trip Started", "trip_id": trip.id}
-
 
 @router.post("/end")
 def end_trip(trip_id: int, db: Session = Depends(get_db)):

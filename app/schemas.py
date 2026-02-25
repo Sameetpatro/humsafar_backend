@@ -60,6 +60,7 @@ class NodeResponse(BaseModel):
     latitude:       float
     longitude:      float
     sequence_order: int
+    is_king:        bool = False
     # FIXED: these were missing — Android NodeDetailScreen reads both fields
     description:    Optional[str] = None
     video_url:      Optional[str] = None
