@@ -129,4 +129,4 @@ def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
 def list_prompts(site_id: int, db: Session = Depends(get_db)):
     """Debug: list all seeded prompts for a site."""
     prompts = db.query(Prompt).filter(Prompt.site_id == site_id).all()
-    return [{"id": p.id, "node_id": p.node_id, "preview": p.context_prompt_text[:120] + "..."} for p in prompts]    
+    return [{"id": p.id, "node_id": p.node_id, "preview": p.context_prompt_text[:120] + "..."} for p in prompts]

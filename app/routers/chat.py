@@ -1,23 +1,25 @@
 # app/routers/chat.py
-# FIXED:
-#   3-tier fallback so chatbot never returns 404:
-#     1. Node-specific Prompt row    (richest context)
-#     2. Site-level Prompt row       (good context)
-#     3. HeritageSite table fields   (always available — summary, history, fun_facts)
-#   This means chat works immediately after seed-bulk, even before seed-prompt.
+# 2-LEVEL PROMPTING:
+#   Level 1 — User enters geofence, no QR scanned yet:
+#             node_id = null → loads site-wide prompt → general campus context
+#   Level 2 — User scans a QR code at a specific node:
+#             node_id = X   → loads node-specific prompt → Mann Sir Cave etc.
+#
+# Fallback chain (if no prompt seeded):
+#   Node prompt → Site prompt → HeritageSite DB columns → bare minimum
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Prompt, HeritageSite, Node
 from app.schemas import ChatRequest, ChatResponse
-from app.services.openrouter import call_openrouter   # direct import, no circular risk
+from app.services.openrouter import call_openrouter
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
 
 def _build_fallback_context(site: HeritageSite, node: Node | None) -> str:
-    parts = [f"Heritage Site: {site.name}"]
+    parts = [f"Site: {site.name}"]
     if site.summary:
         parts.append(f"Summary: {site.summary}")
     if site.history:
@@ -27,57 +29,84 @@ def _build_fallback_context(site: HeritageSite, node: Node | None) -> str:
     if site.helpline_number:
         parts.append(f"Helpline: {site.helpline_number}")
     if node:
-        parts.append(f"\nCurrently at: {node.name} (stop #{node.sequence_order})")
+        parts.append(f"\nCurrently at: {node.name}")
         if node.description:
             parts.append(f"About this spot: {node.description}")
-    if len(parts) == 1:
-        parts.append(
-            f"{site.name} is a heritage site at "
-            f"({site.latitude:.4f}, {site.longitude:.4f}). "
-            "Please add summary/history via the admin seed-bulk endpoint for richer responses."
-        )
     return "\n".join(parts)
+
+
+def _get_context_and_level(
+    db: Session,
+    site_id: int,
+    node_id: int | None
+) -> tuple[str, str]:
+    """
+    Returns (heritage_context, level_label).
+    Level 1 = site-wide (no QR scanned yet)
+    Level 2 = node-specific (QR scanned)
+    """
+
+    # Level 2 — node-specific prompt
+    if node_id:
+        node_prompt = db.query(Prompt).filter(
+            Prompt.site_id == site_id,
+            Prompt.node_id == node_id,
+        ).first()
+        if node_prompt:
+            node = db.query(Node).filter(Node.id == node_id).first()
+            node_name = node.name if node else f"Node {node_id}"
+            return node_prompt.context_prompt_text, f"node:{node_name}"
+
+    # Level 1 — site-wide prompt
+    site_prompt = db.query(Prompt).filter(
+        Prompt.site_id == site_id,
+        Prompt.node_id == None,
+    ).first()
+    if site_prompt:
+        return site_prompt.context_prompt_text, "site:general"
+
+    # Fallback — build from HeritageSite DB columns
+    site = db.query(HeritageSite).filter(HeritageSite.id == site_id).first()
+    if not site:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Site {site_id} not found. Seed it via POST /admin/seed-bulk first."
+        )
+    node = db.query(Node).filter(Node.id == node_id).first() if node_id else None
+    context = _build_fallback_context(site, node)
+    level = f"node:{node.name}" if node else "site:general"
+    return context, level
 
 
 @router.post("/", response_model=ChatResponse)
 async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
-    # Tier 1 — node-specific prompt
-    prompt_record = None
-    if req.node_id:
-        prompt_record = db.query(Prompt).filter(
-            Prompt.site_id == req.site_id,
-            Prompt.node_id == req.node_id,
-        ).first()
+    heritage_context, level = _get_context_and_level(db, req.site_id, req.node_id)
 
-    # Tier 2 — site-level prompt
-    if not prompt_record:
-        prompt_record = db.query(Prompt).filter(
-            Prompt.site_id == req.site_id,
-            Prompt.node_id == None,
-        ).first()
-
-    # Tier 3 — build from HeritageSite + Node columns
-    if prompt_record:
-        heritage_context = prompt_record.context_prompt_text
+    if level.startswith("node:"):
+        node_name = level.split("node:")[1]
+        guide_intro = (
+            f"You are SHREE, the AI guide of HUMSAFAR. "
+            f"The visitor has scanned the QR and is standing at: {node_name}. "
+            f"Answer questions specifically about this location using the context below."
+        )
     else:
-        site = db.query(HeritageSite).filter(HeritageSite.id == req.site_id).first()
-        if not site:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Site {req.site_id} not found. Seed it via POST /admin/seed-bulk first."
-            )
-        node = db.query(Node).filter(Node.id == req.node_id).first() if req.node_id else None
-        heritage_context = _build_fallback_context(site, node)
+        guide_intro = (
+            "You are SHREE, the AI guide of HUMSAFAR. "
+            "The visitor has just entered this site. "
+            "Answer general questions about this place using the context below."
+        )
 
-    system_prompt = f"""You are SHREE, the official AI heritage guide of HUMSAFAR.
+    system_prompt = f"""{guide_intro}
 
 Rules:
 1. Answer using the heritage context provided below.
-2. If the answer is not in the context, use your general knowledge about this site.
-3. Never invent false facts.
-4. Be engaging, warm, and concise (3-5 sentences unless asked for more).
-5. Do not use markdown formatting - responses are displayed in a mobile app.
+2. If the answer is not in the context, use your general knowledge about this specific site.
+3. Never invent false facts. Never say any historical king or Mughal emperor built this place.
+4. Be engaging, warm, and conversational — like a knowledgeable local guide.
+5. Keep responses to 3-5 sentences unless asked for more detail.
+6. Do not use markdown, asterisks, or bullet points — plain text only.
+7. Address the visitor directly and make them feel welcome.
 
 Heritage Context:
 ------------------
