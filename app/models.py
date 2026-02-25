@@ -146,3 +146,16 @@ class Trip(Base):
     is_active = Column(Boolean, default=True)
 
     site = relationship("HeritageSite", back_populates="trips")
+
+class Prompt(Base):
+    __tablename__ = "prompts"
+
+    id       = Column(Integer, primary_key=True, index=True)
+    site_id  = Column(Integer, ForeignKey("heritage_sites.id"), nullable=True)
+    node_id  = Column(Integer, ForeignKey("nodes.id"), nullable=True)
+
+    title    = Column(String, nullable=False)
+    content  = Column(Text, nullable=False)
+
+    site = relationship("HeritageSite")
+    node = relationship("Node")
