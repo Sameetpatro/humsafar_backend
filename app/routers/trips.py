@@ -1,8 +1,8 @@
 # app/routers/trips.py
 # FIXED:
-#   user_id changed from int → str so that the Android client can pass
-#   TripManager.USER_ID = "guest_user_001" without getting a 422 Unprocessable Entity.
-#   Previously `user_id: int` caused FastAPI to reject the string value immediately.
+#   user_id stored as String in Trip so "guest_user_001" != "guest_user_002".
+#   Previously non-numeric IDs were silently coerced to 0, making all guest
+#   trips indistinguishable.
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -25,16 +25,11 @@ def start_trip(user_id: str, qr_value: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=400,
             detail=f"Node '{node.name}' is not a King Node. "
-                   f"Scan the main entrance QR to start a trip."
+                   f"Scan the main entrance QR to start a trip.",
         )
 
-    try:
-        uid_int = int(user_id)
-    except (ValueError, TypeError):
-        uid_int = 0
-
     trip = Trip(
-        user_id=uid_int,
+        user_id=user_id,          # ✅ FIX: store raw string — no lossy int conversion
         site_id=node.site_id,
         started_at=datetime.utcnow(),
         is_active=True,
@@ -46,6 +41,7 @@ def start_trip(user_id: str, qr_value: str, db: Session = Depends(get_db)):
 
     return {"message": "Trip Started", "trip_id": trip.id}
 
+
 @router.post("/end")
 def end_trip(trip_id: int, db: Session = Depends(get_db)):
     trip = db.query(Trip).filter(Trip.id == trip_id).first()
@@ -54,7 +50,7 @@ def end_trip(trip_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Trip not found")
 
     trip.is_active = False
-    trip.ended_at  = datetime.utcnow()
+    trip.ended_at = datetime.utcnow()
 
     db.commit()
 

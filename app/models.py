@@ -1,7 +1,13 @@
+# app/models.py
+# FIXED:
+#   Trip.user_id changed from Integer → String so guest IDs like
+#   "guest_user_001" are stored correctly instead of being coerced to 0.
+
 from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey, Boolean, DateTime, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
+
 
 class HeritageSite(Base):
     __tablename__ = "heritage_sites"
@@ -65,7 +71,7 @@ class Node(Base):
             "unique_king_per_site",
             "site_id",
             unique=True,
-            postgresql_where=(is_king == True)
+            postgresql_where=(is_king == True)   # partial index — one king per site on Postgres
         ),
     )
 
@@ -85,7 +91,7 @@ class Trip(Base):
     __tablename__ = "trips"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer)
+    user_id = Column(String, nullable=True)   # ✅ FIX: was Integer — guest IDs are strings
     site_id = Column(Integer)
     started_at = Column(DateTime, default=datetime.utcnow)
     ended_at = Column(DateTime, nullable=True)

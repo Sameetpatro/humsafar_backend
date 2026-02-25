@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 
-
 from app.database import get_db
 from app.models import HeritageSite, SiteImage, Node, NodeImage, Recommendation, Prompt
 
@@ -26,6 +25,7 @@ class SitePayload(BaseModel):
     fun_facts: Optional[str] = None
     images: List[str] = []
 
+
 class NodePayload(BaseModel):
     name: str
     latitude: float
@@ -35,37 +35,42 @@ class NodePayload(BaseModel):
     qr: str
     description: Optional[str] = None
     images: List[str] = []
+    is_king: bool = False   # ✅ FIX #1: was missing — caused king-check to always fail
+
 
 class LandmarkPayload(BaseModel):
     name: str
     latitude: float
     longitude: float
 
+
 class LandmarksPayload(BaseModel):
     monuments: List[LandmarkPayload] = []
     restaurants: List[LandmarkPayload] = []
     hotels: List[LandmarkPayload] = []
+
 
 class SeedBulkRequest(BaseModel):
     site: SitePayload
     nodes: List[NodePayload]
     landmarks: Optional[LandmarksPayload] = None
 
+
 class SeedPromptRequest(BaseModel):
-    site_id:     int
-    node_id:     Optional[int] = None
+    site_id: int
+    node_id: Optional[int] = None
     prompt_text: str
 
 
 @router.post("/seed-bulk")
 def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
 
-    # 🔥 Enforce exactly ONE king node
-    king_count = sum(1 for n in payload.nodes if getattr(n, "is_king", False))
+    # Enforce exactly ONE king node
+    king_count = sum(1 for n in payload.nodes if n.is_king)
     if king_count != 1:
         raise HTTPException(
             status_code=400,
-            detail="Exactly ONE king node must be defined per site."
+            detail=f"Exactly ONE king node must be defined per site. Found: {king_count}"
         )
 
     site = HeritageSite(
@@ -94,7 +99,7 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
             latitude=node_data.latitude,
             longitude=node_data.longitude,
             sequence_order=node_data.sequence,
-            is_king=getattr(node_data, "is_king", False),
+            is_king=node_data.is_king,   # ✅ reads directly from typed field now
             qr_code_value=node_data.qr,
             description=node_data.description,
             video_url=node_data.video_url,
@@ -110,7 +115,7 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
         for ltype, items in {
             "monument": payload.landmarks.monuments,
             "restaurant": payload.landmarks.restaurants,
-            "hotel": payload.landmarks.hotels
+            "hotel": payload.landmarks.hotels,
         }.items():
             for item in items:
                 if item.name:
@@ -119,7 +124,7 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
                         type=ltype,
                         name=item.name,
                         latitude=item.latitude,
-                        longitude=item.longitude
+                        longitude=item.longitude,
                     ))
 
     db.commit()
@@ -128,5 +133,63 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
         "success": True,
         "site_id": site.id,
         "site_name": site.name,
-        "nodes_created": len(payload.nodes)
+        "nodes_created": len(payload.nodes),
+    }
+
+
+# ✅ FIX #2: /seed-prompt endpoint was defined in schema but never implemented
+@router.post("/seed-prompt")
+def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
+    """
+    Upserts a context prompt for a site (node_id=None) or a specific node.
+    Call this after /seed-bulk to give Ritu/SHREE rich heritage knowledge.
+    """
+    # Validate site exists
+    site = db.query(HeritageSite).filter(HeritageSite.id == payload.site_id).first()
+    if not site:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Site {payload.site_id} not found. Run /seed-bulk first."
+        )
+
+    # Validate node exists if node_id provided
+    if payload.node_id is not None:
+        node = db.query(Node).filter(
+            Node.id == payload.node_id,
+            Node.site_id == payload.site_id,
+        ).first()
+        if not node:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Node {payload.node_id} not found under site {payload.site_id}."
+            )
+
+    # Upsert: update existing prompt or create new one
+    existing = db.query(Prompt).filter(
+        Prompt.site_id == payload.site_id,
+        Prompt.node_id == payload.node_id,
+    ).first()
+
+    if existing:
+        existing.context_prompt_text = payload.prompt_text
+        db.commit()
+        return {
+            "success": True,
+            "action": "updated",
+            "site_id": payload.site_id,
+            "node_id": payload.node_id,
+        }
+
+    db.add(Prompt(
+        site_id=payload.site_id,
+        node_id=payload.node_id,
+        context_prompt_text=payload.prompt_text,
+    ))
+    db.commit()
+
+    return {
+        "success": True,
+        "action": "created",
+        "site_id": payload.site_id,
+        "node_id": payload.node_id,
     }
