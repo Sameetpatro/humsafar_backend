@@ -1,7 +1,10 @@
+# app/routers/sites.py
+# UPDATED: joinedload(Node.images) so NodeDetailScreen gets node_images
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
-from app.models import HeritageSite, Node
+from app.models import HeritageSite, Node, NodeImage
 from app.utils import haversine
 from app.schemas import SiteDetailResponse, NearbySiteResponse
 
@@ -15,8 +18,8 @@ def scan_qr(qr_value: str, db: Session = Depends(get_db)):
         return {"status": "invalid"}
     return {
         "status":         "valid",
-        "site_id":        node.site_id,    # ← Android stores this in ActiveSiteManager
-        "node_id":        node.id,         # ← Android stores this in ActiveSiteManager
+        "site_id":        node.site_id,
+        "node_id":        node.id,
         "sequence_order": node.sequence_order,
         "node_name":      node.name,
     }
@@ -31,20 +34,17 @@ def get_nearby_sites(
 ):
     sites  = db.query(HeritageSite).all()
     result = []
-
     for site in sites:
         distance = haversine(lat, lng, site.latitude, site.longitude)
         if distance <= max_range_km * 1000:
             result.append({
                 "id":              site.id,
                 "name":            site.name,
-                "latitude":        site.latitude,    # ← NEW: needed for map markers
-                "longitude":       site.longitude,   # ← NEW: needed for map markers
+                "latitude":        site.latitude,
+                "longitude":       site.longitude,
                 "distance_meters": round(distance),
                 "inside_geofence": distance <= site.geofence_radius_meters,
             })
-
-    # Sort closest first
     result.sort(key=lambda x: x["distance_meters"])
     return result
 
@@ -55,7 +55,8 @@ def get_site_details(site_id: int, db: Session = Depends(get_db)):
         db.query(HeritageSite)
         .options(
             joinedload(HeritageSite.images),
-            joinedload(HeritageSite.nodes),
+            # Load nodes AND each node's images in one query
+            joinedload(HeritageSite.nodes).joinedload(Node.images),
         )
         .filter(HeritageSite.id == site_id)
         .first()
