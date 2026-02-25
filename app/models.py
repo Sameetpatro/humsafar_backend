@@ -159,3 +159,17 @@ class Prompt(Base):
 
     site = relationship("HeritageSite")
     node = relationship("Node")
+
+
+class Recommendation(Base):
+    __tablename__ = "recommendations"
+
+    id       = Column(Integer, primary_key=True, index=True)
+    site_id  = Column(Integer, ForeignKey("heritage_sites.id"), nullable=True)
+    node_id  = Column(Integer, ForeignKey("nodes.id"), nullable=True)
+
+    title       = Column(String, nullable=False)
+    description = Column(Text)
+
+    site = relationship("HeritageSite")
+    node = relationship("Node")
