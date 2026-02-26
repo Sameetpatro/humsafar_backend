@@ -2,8 +2,8 @@
 # FIXED:
 #   Previously site_id was passed in but NEVER used — LLM only got site_name string.
 #   Now fetches heritage context from DB (same 3-tier logic as chat.py):
-#     1. Node-specific Prompt row
-#     2. Site-level Prompt row
+#     1. Node-specific Prompt row  → prompt.content
+#     2. Site-level Prompt row     → prompt.content
 #     3. HeritageSite summary/history/fun_facts columns (always available)
 #   Voice and text chatbot now use identical knowledge.
 
@@ -54,7 +54,7 @@ def _get_heritage_context(db, site_id: int, node_id: int | None, site_name: str)
             Prompt.node_id == node_id,
         ).first()
         if record:
-            return record.context_prompt_text
+            return record.content   # FIX: was record.context_prompt_text
 
     # Tier 2 — site-level prompt
     record = db.query(Prompt).filter(
@@ -62,7 +62,7 @@ def _get_heritage_context(db, site_id: int, node_id: int | None, site_name: str)
         Prompt.node_id == None,
     ).first()
     if record:
-        return record.context_prompt_text
+        return record.content       # FIX: was record.context_prompt_text
 
     # Tier 3 — build from HeritageSite columns
     site = db.query(HeritageSite).filter(HeritageSite.id == site_id).first()

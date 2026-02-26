@@ -55,7 +55,7 @@ def _get_context_and_level(
         if node_prompt:
             node = db.query(Node).filter(Node.id == node_id).first()
             node_name = node.name if node else f"Node {node_id}"
-            return node_prompt.context_prompt_text, f"node:{node_name}"
+            return node_prompt.content, f"node:{node_name}"   # FIX: was context_prompt_text
 
     # Level 1 — site-wide prompt
     site_prompt = db.query(Prompt).filter(
@@ -63,7 +63,7 @@ def _get_context_and_level(
         Prompt.node_id == None,
     ).first()
     if site_prompt:
-        return site_prompt.context_prompt_text, "site:general"
+        return site_prompt.content, "site:general"             # FIX: was context_prompt_text
 
     # Fallback — build from HeritageSite DB columns
     site = db.query(HeritageSite).filter(HeritageSite.id == site_id).first()

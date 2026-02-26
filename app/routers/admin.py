@@ -35,7 +35,7 @@ class NodePayload(BaseModel):
     qr: str
     description: Optional[str] = None
     images: List[str] = []
-    is_king: bool = False   # ✅ FIX #1: was missing — caused king-check to always fail
+    is_king: bool = False
 
 
 class LandmarkPayload(BaseModel):
@@ -60,6 +60,7 @@ class SeedPromptRequest(BaseModel):
     site_id: int
     node_id: Optional[int] = None
     prompt_text: str
+    title: Optional[str] = None
 
 
 @router.post("/seed-bulk")
@@ -99,7 +100,7 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
             latitude=node_data.latitude,
             longitude=node_data.longitude,
             sequence_order=node_data.sequence,
-            is_king=node_data.is_king,   # ✅ reads directly from typed field now
+            is_king=node_data.is_king,
             qr_code_value=node_data.qr,
             description=node_data.description,
             video_url=node_data.video_url,
@@ -137,7 +138,6 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
     }
 
 
-# ✅ FIX #2: /seed-prompt endpoint was defined in schema but never implemented
 @router.post("/seed-prompt")
 def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
     """
@@ -164,6 +164,15 @@ def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
                 detail=f"Node {payload.node_id} not found under site {payload.site_id}."
             )
 
+    # Derive a title: use provided title, or auto-generate from site/node name
+    if payload.title:
+        title = payload.title
+    elif payload.node_id is not None:
+        node_obj = db.query(Node).filter(Node.id == payload.node_id).first()
+        title = f"{site.name} - {node_obj.name if node_obj else f'Node {payload.node_id}'}"
+    else:
+        title = f"{site.name} - General"
+
     # Upsert: update existing prompt or create new one
     existing = db.query(Prompt).filter(
         Prompt.site_id == payload.site_id,
@@ -171,19 +180,22 @@ def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
     ).first()
 
     if existing:
-        existing.context_prompt_text = payload.prompt_text
+        existing.title   = title
+        existing.content = payload.prompt_text   # FIX: was context_prompt_text
         db.commit()
         return {
             "success": True,
             "action": "updated",
             "site_id": payload.site_id,
             "node_id": payload.node_id,
+            "title":   title,
         }
 
     db.add(Prompt(
         site_id=payload.site_id,
         node_id=payload.node_id,
-        context_prompt_text=payload.prompt_text,
+        title=title,                             # FIX: title column is NOT NULL
+        content=payload.prompt_text,             # FIX: was context_prompt_text
     ))
     db.commit()
 
@@ -192,4 +204,5 @@ def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
         "action": "created",
         "site_id": payload.site_id,
         "node_id": payload.node_id,
+        "title":   title,
     }
