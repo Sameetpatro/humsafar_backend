@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.models import HeritageSite, Node, NodeImage, Recommendation
 from app.utils import haversine
-from app.schemas import SiteDetailResponse, NearbySiteResponse, RecommendationResponse
+from app.schemas import SiteDetailResponse, NearbySiteResponse, RecommendationResponse, NodePositionResponse
 
 router = APIRouter(prefix="/sites", tags=["Sites"])
 
@@ -47,6 +47,19 @@ def get_nearby_sites(
             })
     result.sort(key=lambda x: x["distance_meters"])
     return result
+
+
+@router.get("/{site_id}/nodes", response_model=list[NodePositionResponse])
+def get_site_nodes(site_id: int, db: Session = Depends(get_db)):
+    """Return node id, name, latitude, longitude, sequence_order, is_king for map/directions.
+    Uses exact values from the nodes table."""
+    nodes = (
+        db.query(Node)
+        .filter(Node.site_id == site_id)
+        .order_by(Node.sequence_order)
+        .all()
+    )
+    return nodes
 
 
 @router.get("/{site_id}", response_model=SiteDetailResponse)

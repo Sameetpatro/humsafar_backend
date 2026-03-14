@@ -61,6 +61,18 @@ class NodeResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+class NodePositionResponse(BaseModel):
+    """Minimal node data for map/directions: exact lat/lng from nodes table."""
+    id:             int
+    name:           str
+    latitude:       float
+    longitude:      float
+    sequence_order: int
+    is_king:        bool = False
+    class Config:
+        from_attributes = True
+
 class SiteDetailResponse(BaseModel):
     id:                     int
     name:                   str
