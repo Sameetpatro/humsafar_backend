@@ -93,3 +93,16 @@ class EndTripRequest(BaseModel):
 
 class EndTripResponse(BaseModel):
     message: str
+
+
+class RecommendationResponse(BaseModel):
+    id:          int
+    site_id:     int
+    type:        str          # monument, hotel, restaurant
+    name:        str
+    description: Optional[str] = None
+    latitude:    Optional[float] = None
+    longitude:   Optional[float] = None
+
+    class Config:
+        from_attributes = True

@@ -4,9 +4,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
-from app.models import HeritageSite, Node, NodeImage
+from app.models import HeritageSite, Node, NodeImage, Recommendation
 from app.utils import haversine
-from app.schemas import SiteDetailResponse, NearbySiteResponse
+from app.schemas import SiteDetailResponse, NearbySiteResponse, RecommendationResponse
 
 router = APIRouter(prefix="/sites", tags=["Sites"])
 
@@ -64,3 +64,22 @@ def get_site_details(site_id: int, db: Session = Depends(get_db)):
     if not site:
         raise HTTPException(status_code=404, detail=f"Site {site_id} not found")
     return site
+
+
+@router.get("/{site_id}/recommendations", response_model=list[RecommendationResponse])
+def get_site_recommendations(
+    site_id: int,
+    type: str = None,  # Optional filter: monument, hotel, restaurant
+    db: Session = Depends(get_db)
+):
+    """
+    Get recommendations for a heritage site.
+    Optional filter by type: monument, hotel, restaurant
+    """
+    query = db.query(Recommendation).filter(Recommendation.site_id == site_id)
+    
+    if type:
+        query = query.filter(Recommendation.type == type)
+    
+    recommendations = query.all()
+    return recommendations

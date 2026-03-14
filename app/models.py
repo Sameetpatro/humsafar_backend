@@ -164,12 +164,12 @@ class Prompt(Base):
 class Recommendation(Base):
     __tablename__ = "recommendations"
 
-    id       = Column(Integer, primary_key=True, index=True)
-    site_id  = Column(Integer, ForeignKey("heritage_sites.id"), nullable=True)
-    node_id  = Column(Integer, ForeignKey("nodes.id"), nullable=True)
-
-    title       = Column(String, nullable=False)
-    description = Column(Text)
+    id          = Column(Integer, primary_key=True, index=True)
+    site_id     = Column(Integer, ForeignKey("heritage_sites.id"), nullable=False)
+    type        = Column(String, nullable=False)  # monument, hotel, restaurant
+    name        = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    latitude    = Column(Float, nullable=True)
+    longitude   = Column(Float, nullable=True)
 
     site = relationship("HeritageSite")
-    node = relationship("Node")
