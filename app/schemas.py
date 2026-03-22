@@ -1,5 +1,4 @@
 # app/schemas.py
-# UPDATED: NodeResponse now includes images: List[NodeImageResponse]
 
 from pydantic import BaseModel
 from typing import List, Optional
@@ -31,7 +30,6 @@ class SiteImageResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# NEW ─────────────────────────────────────────────────────────────────────────
 class NodeImageResponse(BaseModel):
     id:            int
     image_url:     str
@@ -53,17 +51,15 @@ class NodeResponse(BaseModel):
     latitude:       float
     longitude:      float
     sequence_order: int
-    is_king:        bool = False
+    is_king:        bool         = False
     description:    Optional[str] = None
     video_url:      Optional[str] = None
     image_url:      Optional[str] = None
-    images:         List[NodeImageResponse] = []   # ← node_images rows
+    images:         List[NodeImageResponse] = []
     class Config:
         from_attributes = True
 
-
 class NodePositionResponse(BaseModel):
-    """Minimal node data for map/directions: exact lat/lng from nodes table."""
     id:             int
     name:           str
     latitude:       float
@@ -84,11 +80,11 @@ class SiteDetailResponse(BaseModel):
     fun_facts:              Optional[str] = None
     helpline_number:        Optional[str] = None
     static_map_url:         Optional[str] = None
-    intro_video_url:        Optional[str] = None   # ← heritage_sites.intro_video_url
+    intro_video_url:        Optional[str] = None
     rating:                 float
     upvotes:                int
     images:                 List[SiteImageResponse] = []
-    nodes:                  List[NodeResponse] = []
+    nodes:                  List[NodeResponse]      = []
     class Config:
         from_attributes = True
 
@@ -106,15 +102,31 @@ class EndTripRequest(BaseModel):
 class EndTripResponse(BaseModel):
     message: str
 
-
 class RecommendationResponse(BaseModel):
     id:          int
     site_id:     int
-    type:        str          # monument, hotel, restaurant
+    type:        str
     name:        str
-    description: Optional[str] = None
-    latitude:    Optional[float] = None
-    longitude:   Optional[float] = None
+    description: Optional[str]   = None
+    latitude:    Optional[float]  = None
+    longitude:   Optional[float]  = None
+    class Config:
+        from_attributes = True
 
+# ── Amenity ───────────────────────────────────────────────────────────────────
+
+class AmenityResponse(BaseModel):
+    id:              int
+    site_id:         int
+    node_id:         Optional[int]   = None
+    type:            str
+    name:            str
+    description:     Optional[str]   = None
+    latitude:        float
+    longitude:       float
+    price_info:      Optional[str]   = None
+    timing:          Optional[str]   = None
+    is_paid:         bool            = False
+    distance_meters: Optional[float] = None
     class Config:
         from_attributes = True

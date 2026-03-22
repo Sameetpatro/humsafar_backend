@@ -2,14 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine, Base
-from app.routers import sites, trips, chat, voice, admin, reviews
+from app.routers import sites, trips, chat, voice, admin, reviews, amenities
 from app.db_triggers import install_review_triggers
 
 Base.metadata.create_all(bind=engine)
 try:
     install_review_triggers()
 except Exception:
-    pass  # triggers may fail if tables not yet created or not PostgreSQL
+    pass
 
 app = FastAPI(
     title="HUMSAFAR Backend",
@@ -31,6 +31,7 @@ app.include_router(chat.router)
 app.include_router(voice.router)
 app.include_router(admin.router)
 app.include_router(reviews.router)
+app.include_router(amenities.router)
 
 @app.get("/")
 def root():
