@@ -244,3 +244,25 @@ def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
         "node_id": payload.node_id,
         "title": title,
     }
+
+@router.post("/add-recommendations")
+def add_recommendations(site_id: int, recs: List[RecommendationPayload], db: Session = Depends(get_db)):
+
+    # check site exists
+    site = db.query(HeritageSite).filter_by(id=site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    for rec in recs:
+        db.add(Recommendation(
+            site_id=site_id,
+            type=rec.type,
+            name=rec.name,
+            latitude=rec.latitude,
+            longitude=rec.longitude,
+            description=rec.description
+        ))
+
+    db.commit()
+
+    return {"success": True, "site_id": site_id}
