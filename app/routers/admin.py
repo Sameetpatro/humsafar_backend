@@ -1,4 +1,5 @@
 # app/routers/admin.py
+
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -11,6 +12,10 @@ from app.models import HeritageSite, SiteImage, Node, NodeImage, Recommendation,
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
+
+# ─────────────────────────────────────────────────────────────
+# Payloads
+# ─────────────────────────────────────────────────────────────
 
 class SitePayload(BaseModel):
     name: str
@@ -50,10 +55,20 @@ class LandmarksPayload(BaseModel):
     hotels: List[LandmarkPayload] = []
 
 
+# ✅ NEW (Flexible Recommendations)
+class RecommendationPayload(BaseModel):
+    type: str
+    name: str
+    latitude: float
+    longitude: float
+    description: Optional[str] = None
+
+
 class SeedBulkRequest(BaseModel):
     site: SitePayload
     nodes: List[NodePayload]
-    landmarks: Optional[LandmarksPayload] = None
+    landmarks: Optional[LandmarksPayload] = None   # old system (kept)
+    recommendations: List[RecommendationPayload] = []   # ✅ fixed
 
 
 class SeedPromptRequest(BaseModel):
@@ -62,6 +77,10 @@ class SeedPromptRequest(BaseModel):
     prompt_text: str
     title: Optional[str] = None
 
+
+# ─────────────────────────────────────────────────────────────
+# SEED BULK
+# ─────────────────────────────────────────────────────────────
 
 @router.post("/seed-bulk")
 def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
@@ -74,6 +93,7 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
             detail=f"Exactly ONE king node must be defined per site. Found: {king_count}"
         )
 
+    # Create Site
     site = HeritageSite(
         name=payload.site.name,
         latitude=payload.site.latitude,
@@ -89,10 +109,12 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
     db.add(site)
     db.flush()
 
+    # Site Images
     for order, url in enumerate(payload.site.images):
         if url:
             db.add(SiteImage(site_id=site.id, image_url=url, display_order=order))
 
+    # Nodes
     for node_data in payload.nodes:
         node = Node(
             site_id=site.id,
@@ -108,10 +130,14 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
         db.add(node)
         db.flush()
 
+        # Node Images
         for order, url in enumerate(node_data.images):
             if url:
                 db.add(NodeImage(node_id=node.id, image_url=url, display_order=order))
 
+    # ─────────────────────────────────────────
+    # OLD LANDMARKS (kept for compatibility)
+    # ─────────────────────────────────────────
     if payload.landmarks:
         for ltype, items in {
             "monument": payload.landmarks.monuments,
@@ -128,6 +154,20 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
                         longitude=item.longitude,
                     ))
 
+    # ─────────────────────────────────────────
+    # ✅ NEW RECOMMENDATIONS (FIXED)
+    # ─────────────────────────────────────────
+    if payload.recommendations:
+        for rec in payload.recommendations:
+            db.add(Recommendation(
+                site_id=site.id,
+                type=rec.type,
+                name=rec.name,
+                latitude=rec.latitude,
+                longitude=rec.longitude,
+                description=rec.description,
+            ))
+
     db.commit()
 
     return {
@@ -138,13 +178,13 @@ def seed_bulk(payload: SeedBulkRequest, db: Session = Depends(get_db)):
     }
 
 
+# ─────────────────────────────────────────────────────────────
+# PROMPT SEED
+# ─────────────────────────────────────────────────────────────
+
 @router.post("/seed-prompt")
 def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
-    """
-    Upserts a context prompt for a site (node_id=None) or a specific node.
-    Call this after /seed-bulk to give Ritu/SHREE rich heritage knowledge.
-    """
-    # Validate site exists
+
     site = db.query(HeritageSite).filter(HeritageSite.id == payload.site_id).first()
     if not site:
         raise HTTPException(
@@ -152,7 +192,6 @@ def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
             detail=f"Site {payload.site_id} not found. Run /seed-bulk first."
         )
 
-    # Validate node exists if node_id provided
     if payload.node_id is not None:
         node = db.query(Node).filter(
             Node.id == payload.node_id,
@@ -164,7 +203,7 @@ def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
                 detail=f"Node {payload.node_id} not found under site {payload.site_id}."
             )
 
-    # Derive a title: use provided title, or auto-generate from site/node name
+    # Title logic
     if payload.title:
         title = payload.title
     elif payload.node_id is not None:
@@ -173,29 +212,28 @@ def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
     else:
         title = f"{site.name} - General"
 
-    # Upsert: update existing prompt or create new one
     existing = db.query(Prompt).filter(
         Prompt.site_id == payload.site_id,
         Prompt.node_id == payload.node_id,
     ).first()
 
     if existing:
-        existing.title   = title
-        existing.content = payload.prompt_text   # FIX: was context_prompt_text
+        existing.title = title
+        existing.content = payload.prompt_text
         db.commit()
         return {
             "success": True,
             "action": "updated",
             "site_id": payload.site_id,
             "node_id": payload.node_id,
-            "title":   title,
+            "title": title,
         }
 
     db.add(Prompt(
         site_id=payload.site_id,
         node_id=payload.node_id,
-        title=title,                             # FIX: title column is NOT NULL
-        content=payload.prompt_text,             # FIX: was context_prompt_text
+        title=title,
+        content=payload.prompt_text,
     ))
     db.commit()
 
@@ -204,5 +242,5 @@ def seed_prompt(payload: SeedPromptRequest, db: Session = Depends(get_db)):
         "action": "created",
         "site_id": payload.site_id,
         "node_id": payload.node_id,
-        "title":   title,
+        "title": title,
     }
