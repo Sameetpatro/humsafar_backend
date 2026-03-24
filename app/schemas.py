@@ -56,6 +56,7 @@ class NodeResponse(BaseModel):
     video_url:      Optional[str] = None
     image_url:      Optional[str] = None
     images:         List[NodeImageResponse] = []
+    qr_code_value: str
     class Config:
         from_attributes = True
 
