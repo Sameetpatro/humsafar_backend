@@ -96,3 +96,8 @@ def get_site_recommendations(
     
     recommendations = query.all()
     return recommendations
+
+@router.get("/{site_id}/recommendations", response_model=list[RecommendationResponse])
+def get_recommendations(site_id: int, db: Session = Depends(get_db)):
+    recs = db.query(Recommendation).filter(Recommendation.site_id == site_id).all()
+    return recs
