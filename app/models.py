@@ -18,6 +18,7 @@ from sqlalchemy import (
     ForeignKey,
     Text,
     DateTime,
+    Index,
     SmallInteger,
     UniqueConstraint,
     text,
@@ -88,6 +89,17 @@ class SiteImage(Base):
 
 class Node(Base):
     __tablename__ = "nodes"
+    __table_args__ = (
+        # Hard guarantee at the DB layer: exactly ONE king node per site.
+        # Application layer (admin/seed-bulk) also enforces this, but a partial
+        # unique index protects against direct DB inserts / future endpoints.
+        Index(
+            "uq_king_node_per_site",
+            "site_id",
+            unique=True,
+            postgresql_where=text("is_king = TRUE"),
+        ),
+    )
 
     id             = Column(Integer, primary_key=True, index=True)
     site_id        = Column(Integer, ForeignKey("heritage_sites.id", ondelete="CASCADE"), nullable=False)

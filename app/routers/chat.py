@@ -8,12 +8,17 @@
 # Fallback chain (if no prompt seeded):
 #   Node prompt → Site prompt → HeritageSite DB columns → bare minimum
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Prompt, HeritageSite, Node
+from app.models import Prompt, HeritageSite, Node, UserChatHistory
+from app.routers.users import get_user_uuid
 from app.schemas import ChatRequest, ChatResponse
 from app.services.openrouter import call_openrouter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -119,4 +124,40 @@ Heritage Context:
     messages.append({"role": "user", "content": req.message})
 
     reply = await call_openrouter(messages)
+
+    # Persist the exchange to user_chat_history (best-effort).
+    # Skipped silently when no firebase_uid is provided OR the user is not
+    # registered yet — chat must never fail because of analytics writes.
+    if req.firebase_uid:
+        try:
+            user_uuid = get_user_uuid(req.firebase_uid, db)
+            lang = req.lang_code or "en-IN"
+            db.add_all([
+                UserChatHistory(
+                    user_id   = user_uuid,
+                    trip_id   = req.trip_id,
+                    site_id   = req.site_id,
+                    node_id   = req.node_id,
+                    role      = "user",
+                    content   = req.message,
+                    lang_code = lang,
+                ),
+                UserChatHistory(
+                    user_id   = user_uuid,
+                    trip_id   = req.trip_id,
+                    site_id   = req.site_id,
+                    node_id   = req.node_id,
+                    role      = "assistant",
+                    content   = reply,
+                    lang_code = lang,
+                ),
+            ])
+            db.commit()
+        except HTTPException:
+            # User not registered — skip silently
+            db.rollback()
+        except Exception as exc:
+            db.rollback()
+            logger.warning(f"[/chat] user_chat_history write failed: {exc}")
+
     return ChatResponse(reply=reply)

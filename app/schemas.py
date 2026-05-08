@@ -49,6 +49,13 @@ class ChatRequest(BaseModel):
     node_id: Optional[int] = None
     message: str
     history: List[ChatMessage] = []
+    # Optional persistence fields. When firebase_uid is provided the user's
+    # message and the assistant reply are written to user_chat_history.
+    # Calls without firebase_uid still work (no DB write) — keeps backwards
+    # compatibility with older Android builds.
+    firebase_uid: Optional[str] = None
+    trip_id:      Optional[int] = None
+    lang_code:    Optional[str] = None
 
 
 class ChatResponse(BaseModel):

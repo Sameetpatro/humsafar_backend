@@ -2,7 +2,8 @@
 # UPGRADED:
 #   - Added /users and /community routers
 #   - Removed install_review_triggers() — triggers replaced by transactional updates
-#   - db_triggers.py is now dead code (safe to delete)
+#   - db_triggers.py removed; aggregate columns (rating, avg_rating, rating_count)
+#     are now updated in the same Python transaction as the INSERT (see reviews.py)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
