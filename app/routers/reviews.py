@@ -164,14 +164,46 @@ def submit_review(body: ReviewSubmitBody, db: Session = Depends(get_db)):
     # 4. Refresh analyzed_responses inline (fast at small scale; move to Celery at 50K+ reviews)
     _refresh_analyzed(db, body.site_id)
 
-    # 5. Mark visit history review_submitted
-    db.execute(
-        text("""
-            UPDATE user_visit_history SET review_submitted = true
-            WHERE trip_id = :trip_id AND user_id = :user_id
-        """),
-        {"trip_id": body.trip_id, "user_id": str(user_uuid)}
-    )
+    # 5. Mark visit history review_submitted.
+    #    If /trips/end hasn't landed yet (slow network, fire-and-forget races),
+    #    a plain UPDATE silently no-ops. Upsert a minimal row instead so the
+    #    review submission is never lost — /trips/end's later ON CONFLICT
+    #    will fill in the timing/visited fields without resetting this flag.
+    trip_row = db.execute(
+        text("SELECT site_id, started_at FROM trips WHERE id = :tid"),
+        {"tid": body.trip_id},
+    ).fetchone()
+
+    if trip_row is None:
+        # Should never happen — the FK on trip_reviews already enforced this —
+        # but guard so the route degrades to "review saved, history pending".
+        pass
+    else:
+        site_for_history = db.query(HeritageSite).filter(HeritageSite.id == trip_row[0]).first()
+        site_name_hist   = site_for_history.name if site_for_history else "Unknown"
+        started_at       = trip_row[1]
+        total_nodes_hist = db.query(Node).filter(Node.site_id == trip_row[0]).count()
+
+        db.execute(
+            text("""
+                INSERT INTO user_visit_history
+                    (user_id, site_id, trip_id, site_name,
+                     total_nodes, completed, visited_at, review_submitted)
+                VALUES
+                    (:user_id, :site_id, :trip_id, :site_name,
+                     :total_nodes, true, :visited_at, true)
+                ON CONFLICT (user_id, trip_id) DO UPDATE SET
+                    review_submitted = true
+            """),
+            {
+                "user_id":     str(user_uuid),
+                "site_id":     trip_row[0],
+                "trip_id":     body.trip_id,
+                "site_name":   site_name_hist,
+                "total_nodes": total_nodes_hist,
+                "visited_at":  started_at,
+            },
+        )
 
     db.commit()
 
