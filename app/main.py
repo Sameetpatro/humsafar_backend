@@ -7,6 +7,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.database import engine, Base
 from app.routers import sites, trips, chat, voice, admin, reviews, amenities
@@ -15,6 +16,26 @@ from app.routers import users, community
 # Create all tables (new tables: users, node_ratings, node_comments,
 # site_feedback, user_chat_history are created automatically here)
 Base.metadata.create_all(bind=engine)
+
+# ── In-place migrations ──────────────────────────────────────────────────────
+# create_all() never ALTERs existing tables, so when we add columns to a model
+# we apply them here. Idempotent — safe to run on every boot. Move to Alembic
+# once the schema stops moving every release.
+def _run_inplace_migrations() -> None:
+    statements = [
+        # Threaded comments (replies)
+        """ALTER TABLE node_comments
+           ADD COLUMN IF NOT EXISTS parent_comment_id INTEGER
+           REFERENCES node_comments(id) ON DELETE CASCADE""",
+        """CREATE INDEX IF NOT EXISTS ix_node_comments_node_root
+           ON node_comments (node_id, parent_comment_id, created_at)""",
+    ]
+    with engine.begin() as conn:
+        for stmt in statements:
+            conn.execute(text(stmt))
+
+
+_run_inplace_migrations()
 
 app = FastAPI(
     title="Dharohar Setu Backend",

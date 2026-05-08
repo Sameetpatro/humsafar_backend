@@ -267,17 +267,28 @@ class UserChatHistory(Base):
 # ── Community ─────────────────────────────────────────────────────────────────
 
 class NodeComment(Base):
-    """User comments on individual nodes. Future release feature."""
-    __tablename__ = "node_comments"
+    """
+    User comments on individual nodes.
 
-    id         = Column(Integer, primary_key=True, index=True)
-    user_id    = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    site_id    = Column(Integer, ForeignKey("heritage_sites.id", ondelete="CASCADE"), nullable=False)
-    node_id    = Column(Integer, ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False)
-    content    = Column(Text, nullable=False)
-    is_flagged = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    Supports flat 2-level threading: a comment is either a root post
+    (parent_comment_id IS NULL) or a reply to a root post. Replies-to-replies
+    are normalized server-side back to the root parent so the UI stays flat.
+    """
+    __tablename__ = "node_comments"
+    __table_args__ = (
+        Index("ix_node_comments_node_root",
+              "node_id", "parent_comment_id", "created_at"),
+    )
+
+    id                = Column(Integer, primary_key=True, index=True)
+    user_id           = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    site_id           = Column(Integer, ForeignKey("heritage_sites.id", ondelete="CASCADE"), nullable=False)
+    node_id           = Column(Integer, ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False)
+    parent_comment_id = Column(Integer, ForeignKey("node_comments.id", ondelete="CASCADE"), nullable=True)
+    content           = Column(Text, nullable=False)
+    is_flagged        = Column(Boolean, default=False)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at        = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class SiteFeedback(Base):

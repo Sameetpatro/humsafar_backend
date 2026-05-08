@@ -240,20 +240,28 @@ class ReviewSummaryResponse(BaseModel):
 # ── Community ─────────────────────────────────────────────────────────────────
 
 class NodeCommentCreate(BaseModel):
-    firebase_uid: str
-    site_id:      int
-    node_id:      int
-    content:      str
+    firebase_uid:      str
+    site_id:           int
+    node_id:           int
+    content:           str
+    parent_comment_id: Optional[int] = None   # set for replies; None = root post
 
 
 class NodeCommentResponse(BaseModel):
-    id:         int
-    user_id:    UUID
-    site_id:    int
-    node_id:    int
-    content:    str
-    is_flagged: bool
-    created_at: datetime
+    id:                int
+    user_id:           UUID
+    site_id:           int
+    node_id:           int
+    parent_comment_id: Optional[int] = None
+    content:           str
+    is_flagged:        bool
+    created_at:        datetime
+    # Display-time enrichments (joined from users table) — keep optional so
+    # any caller that POSTs and gets back a fresh row still validates.
+    display_name:      Optional[str] = None
+    avatar_url:        Optional[str] = None
+    reply_count:       int           = 0
+    is_own:            bool          = False  # set when firebase_uid is passed
 
     class Config:
         from_attributes = True

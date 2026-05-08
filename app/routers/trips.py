@@ -25,20 +25,18 @@ def start_trip(
     db: Session = Depends(get_db),
 ):
     """
-    Start a trip by scanning the King QR code.
+    Start a trip by scanning any valid node QR code.
     Requires the user to be registered (POST /users/register) first.
+
+    A trip can be started from any node — the king node is a hint for the
+    "main entrance" but not a hard requirement, since heritage sites often
+    have multiple entry points.
     """
     user_uuid = get_user_uuid(firebase_uid, db)
 
     node = db.query(Node).filter(Node.qr_code_value == qr_value).first()
     if not node:
         raise HTTPException(status_code=400, detail="Invalid QR Code")
-
-    if not node.is_king:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Node '{node.name}' is not a King Node. Scan the main entrance QR to start a trip.",
-        )
 
     trip = Trip(
         user_id    = user_uuid,
@@ -52,7 +50,12 @@ def start_trip(
     db.commit()
     db.refresh(trip)
 
-    return {"message": "Trip Started", "trip_id": trip.id, "site_id": node.site_id}
+    return {
+        "message":     "Trip Started",
+        "trip_id":     trip.id,
+        "site_id":     node.site_id,
+        "started_from_king": bool(node.is_king),
+    }
 
 
 @router.post("/end")
