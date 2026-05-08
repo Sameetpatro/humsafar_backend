@@ -7,7 +7,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import get_db
 from app.models import Trip, Node, HeritageSite
@@ -41,7 +41,7 @@ def start_trip(
     trip = Trip(
         user_id    = user_uuid,
         site_id    = node.site_id,
-        started_at = datetime.utcnow(),
+        started_at = datetime.now(timezone.utc),  # tz-aware to match TIMESTAMPTZ
         is_active  = True,
         entry_lat  = entry_lat,
         entry_lng  = entry_lng,
@@ -72,7 +72,10 @@ def end_trip(
         raise HTTPException(status_code=404, detail="Trip not found")
 
     trip.is_active = False
-    trip.ended_at  = datetime.utcnow()
+    # Use a tz-aware UTC timestamp; the column is TIMESTAMPTZ so a naive
+    # datetime here would crash on `ended_at - started_at` below with
+    # "can't subtract offset-naive and offset-aware datetimes".
+    trip.ended_at  = datetime.now(timezone.utc)
 
     site      = db.query(HeritageSite).filter(HeritageSite.id == trip.site_id).first()
     site_name = site.name if site else "Unknown"
@@ -86,8 +89,18 @@ def end_trip(
 
     duration_mins = None
     if trip.started_at and trip.ended_at:
-        delta = trip.ended_at - trip.started_at
-        duration_mins = int(delta.total_seconds() / 60)
+        # Defensive: align tz-awareness on both sides before subtracting.
+        # Postgres TIMESTAMPTZ comes back tz-aware, but if any historical
+        # row was inserted with a naive value (older deploys did
+        # datetime.utcnow()), the subtraction would TypeError.
+        started = trip.started_at
+        ended   = trip.ended_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if ended.tzinfo is None:
+            ended   = ended.replace(tzinfo=timezone.utc)
+        delta = ended - started
+        duration_mins = max(0, int(delta.total_seconds() / 60))
 
     try:
         db.execute(
