@@ -37,6 +37,78 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+class PhoneUpdate(BaseModel):
+    phone: str
+
+
+# ── Live stats / visitor counts ─────────────────────────────────────────────────
+
+class LiveStatsResponse(BaseModel):
+    active_users:    int      # users active within the last few minutes
+    lifetime_visits: int      # cumulative app opens (all time)
+    total_users:     int      # distinct registered users
+
+
+# ── Insights & lightweight ML ───────────────────────────────────────────────────
+
+class DailyVisit(BaseModel):
+    date:  str               # "MM-DD"
+    count: int
+
+
+class NodePopularity(BaseModel):
+    node_id:          int
+    name:             str
+    visits:           int
+    avg_rating:       float = 0.0
+    rating_count:     int   = 0
+    engagement_score: float = 0.0
+
+
+class SiteMlInsight(BaseModel):
+    model:                       str   = "linear_regression"
+    trained_on:                  int   = 0      # number of samples the model saw
+    predicted_visits_next_day:   int   = 0
+    visits_trend:                str   = "steady"   # rising | falling | steady
+    mins_per_extra_node:         float = 0.0
+    predicted_full_duration_mins: float = 0.0
+    engagement_score:            float = 0.0    # 0–100
+    insight_text:                str   = ""
+
+
+class SiteInsightsResponse(BaseModel):
+    site_id:             int
+    site_name:           str
+    total_visits:        int
+    unique_visitors:     int
+    avg_duration_mins:   float
+    avg_nodes_completed: float
+    completion_rate:     float           # 0–100 (%)
+    total_interactions:  int             # chat/voice messages logged for the site
+    avg_rating:          float
+    daily_visits:        List[DailyVisit]    = []
+    node_popularity:     List[NodePopularity] = []
+    ml:                  SiteMlInsight
+
+
+class NodeMlInsight(BaseModel):
+    engagement_score: float = 0.0     # 0–100
+    insight_text:     str   = ""
+
+
+class NodeInsightsResponse(BaseModel):
+    node_id:        int
+    site_id:        int
+    name:           str
+    visits:         int
+    avg_rating:     float = 0.0
+    rating_count:   int   = 0
+    comments:       int   = 0
+    interactions:   int   = 0
+    popularity_pct: float = 0.0       # share of site visits that reached this node
+    ml:             NodeMlInsight
+
+
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 class ChatMessage(BaseModel):

@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from app.database import engine, Base
 from app.routers import sites, trips, chat, voice, admin, reviews, amenities
-from app.routers import users, community
+from app.routers import users, community, stats, insights
 
 # Create all tables (new tables: users, node_ratings, node_comments,
 # site_feedback, user_chat_history are created automatically here)
@@ -68,6 +68,10 @@ app.include_router(community.router)
 
 # Discovery
 app.include_router(amenities.router)
+
+# Live stats & insights (visitor counts + per-site / per-node analytics + ML)
+app.include_router(stats.router)
+app.include_router(insights.router)
 
 # Admin / seeding
 app.include_router(admin.router)

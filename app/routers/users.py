@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 from app.database import get_db
 from app.models import User
-from app.schemas import UserCreate, UserResponse
+from app.schemas import UserCreate, UserResponse, PhoneUpdate
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -45,6 +45,11 @@ def register_or_update(payload: UserCreate, db: Session = Depends(get_db)):
             user.display_name = payload.display_name
         if payload.email is not None:
             user.email = payload.email
+        # Persist the phone whenever the client sends a non-empty value.
+        # (Previously phone was only stored on first registration, so a number
+        # collected after a Google sign-in never reached the database.)
+        if payload.phone:
+            user.phone = payload.phone
         if payload.avatar_url is not None:
             user.avatar_url = payload.avatar_url
         if payload.preferred_lang:
@@ -68,6 +73,28 @@ def register_or_update(payload: UserCreate, db: Session = Depends(get_db)):
         is_anonymous   = payload.is_anonymous,
     )
     db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.patch("/{firebase_uid}/phone", response_model=UserResponse)
+def update_phone(firebase_uid: str, payload: PhoneUpdate, db: Session = Depends(get_db)):
+    """
+    Set / update a user's mobile number. Used by the Android app right after a
+    Google sign-in (Google never returns a phone number), where we ask the user
+    for their mobile before letting them into the app.
+    """
+    user = db.query(User).filter(User.firebase_uid == firebase_uid).first()
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail=f"User with firebase_uid '{firebase_uid}' not found. Call POST /users/register first."
+        )
+    phone = (payload.phone or "").strip()
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number cannot be empty")
+    user.phone = phone
     db.commit()
     db.refresh(user)
     return user

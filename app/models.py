@@ -46,6 +46,22 @@ class User(Base):
     last_active_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+# ── Global / App-wide Stats ─────────────────────────────────────────────────────
+
+class GlobalStats(Base):
+    """
+    Single-row table (id=1) holding app-wide counters that are expensive to
+    derive on every request. `lifetime_visits` is incremented once per app
+    cold-start via POST /stats/visit. "Active users right now" is derived from
+    users.last_active_at and never stored here.
+    """
+    __tablename__ = "global_stats"
+
+    id              = Column(Integer, primary_key=True, default=1)
+    lifetime_visits = Column(Integer, default=0, nullable=False)
+    updated_at      = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 # ── Heritage Sites ────────────────────────────────────────────────────────────
 
 class HeritageSite(Base):
