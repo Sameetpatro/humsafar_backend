@@ -17,6 +17,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Text,
+    Date,
     DateTime,
     Index,
     SmallInteger,
@@ -248,6 +249,64 @@ class AnalyzedResponse(Base):
     recommend_pct          = Column(Float, default=0.0)
     satisfaction_label     = Column(String(50), default="No data")
     last_updated           = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Insight snapshots (training data) ───────────────────────────────────────────
+
+class SiteInsightSnapshot(Base):
+    """
+    One row per site per day capturing the computed insight metrics + the tiny
+    model's outputs. Accumulates a historical time-series you can train richer
+    models on later (vs. the live 14-day window). Upserted on (site_id, date).
+    """
+    __tablename__ = "site_insight_snapshots"
+    __table_args__ = (
+        UniqueConstraint("site_id", "snapshot_date", name="uq_site_snapshot_site_date"),
+        Index("ix_site_snapshot_site_date", "site_id", "snapshot_date"),
+    )
+
+    id                           = Column(Integer, primary_key=True, index=True)
+    site_id                      = Column(Integer, ForeignKey("heritage_sites.id", ondelete="CASCADE"), nullable=False)
+    snapshot_date                = Column(Date, nullable=False)
+    total_visits                 = Column(Integer, default=0)
+    unique_visitors              = Column(Integer, default=0)
+    avg_duration_mins            = Column(Float, default=0.0)
+    avg_nodes_completed          = Column(Float, default=0.0)
+    completion_rate              = Column(Float, default=0.0)
+    total_interactions           = Column(Integer, default=0)
+    avg_rating                   = Column(Float, default=0.0)
+    engagement_score             = Column(Float, default=0.0)
+    predicted_visits_next_day    = Column(Integer, default=0)
+    visits_trend                 = Column(String(20), default="steady")
+    mins_per_extra_node          = Column(Float, default=0.0)
+    predicted_full_duration_mins = Column(Float, default=0.0)
+    created_at                   = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserInsight(Base):
+    """
+    Personal, per-user aggregated insights — the user's own heritage footprint.
+    Recomputed and upserted on demand (one row per user).
+    """
+    __tablename__ = "user_insights"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_user_insights_user"),)
+
+    id                           = Column(Integer, primary_key=True, index=True)
+    user_id                      = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    total_visits                 = Column(Integer, default=0)
+    sites_explored               = Column(Integer, default=0)
+    total_duration_mins          = Column(Integer, default=0)
+    avg_duration_mins            = Column(Float, default=0.0)
+    total_nodes_completed        = Column(Integer, default=0)
+    avg_completion_rate          = Column(Float, default=0.0)
+    total_interactions           = Column(Integer, default=0)
+    favorite_site_id             = Column(Integer, nullable=True)
+    favorite_site_name           = Column(String(255), nullable=True)
+    engagement_score             = Column(Float, default=0.0)
+    explorer_level               = Column(String(40), default="Newcomer")
+    predicted_next_duration_mins = Column(Float, default=0.0)
+    last_computed_at             = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at                   = Column(DateTime(timezone=True), server_default=func.now())
 
 
 # ── AI & Content ──────────────────────────────────────────────────────────────

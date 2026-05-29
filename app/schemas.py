@@ -109,6 +109,43 @@ class NodeInsightsResponse(BaseModel):
     ml:             NodeMlInsight
 
 
+# ── Stored insight snapshots (training data) ─────────────────────────────────────
+
+class SiteInsightSnapshotResponse(BaseModel):
+    snapshot_date:                str            # "YYYY-MM-DD"
+    total_visits:                 int   = 0
+    unique_visitors:              int   = 0
+    avg_duration_mins:            float = 0.0
+    avg_nodes_completed:          float = 0.0
+    completion_rate:              float = 0.0
+    total_interactions:           int   = 0
+    avg_rating:                   float = 0.0
+    engagement_score:             float = 0.0
+    predicted_visits_next_day:    int   = 0
+    visits_trend:                 str   = "steady"
+    mins_per_extra_node:          float = 0.0
+    predicted_full_duration_mins: float = 0.0
+
+
+# ── Personal (per-user) insights ─────────────────────────────────────────────────
+
+class UserInsightsResponse(BaseModel):
+    user_id:                      str
+    total_visits:                 int   = 0
+    sites_explored:               int   = 0
+    total_duration_mins:          int   = 0
+    avg_duration_mins:            float = 0.0
+    total_nodes_completed:        int   = 0
+    avg_completion_rate:          float = 0.0
+    total_interactions:           int   = 0
+    favorite_site_id:             Optional[int] = None
+    favorite_site_name:           Optional[str] = None
+    engagement_score:             float = 0.0
+    explorer_level:               str   = "Newcomer"
+    predicted_next_duration_mins: float = 0.0
+    insight_text:                 str   = ""
+
+
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 class ChatMessage(BaseModel):
