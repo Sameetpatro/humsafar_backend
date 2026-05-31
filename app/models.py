@@ -43,6 +43,7 @@ class User(Base):
     avatar_url     = Column(Text, nullable=True)
     preferred_lang = Column(String(10), default="en-IN")
     is_anonymous   = Column(Boolean, default=False)
+    gems           = Column(Integer, default=0, nullable=False, server_default=text("0"))
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
     last_active_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -412,3 +413,115 @@ class Amenity(Base):
 
     site = relationship("HeritageSite")
     node = relationship("Node")
+
+
+# ── Gamification: gems wallet ledger ────────────────────────────────────────────
+
+class GemTransaction(Base):
+    """
+    Append-only ledger of every gem credit/debit. `users.gems` is the live
+    balance; this table is the audit trail (quiz rewards, bonus games, coupon
+    purchases). `balance_after` snapshots the wallet right after the row.
+    """
+    __tablename__ = "gem_transactions"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    user_id       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    delta         = Column(Integer, nullable=False)         # +credit / -debit
+    reason        = Column(String(40), nullable=False)      # quiz | bonus_game | coupon_purchase | adjust
+    ref_id        = Column(String(64), nullable=True)       # session id / coupon id / challenge id
+    balance_after = Column(Integer, nullable=False, default=0)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# ── Gamification: final quiz ────────────────────────────────────────────────────
+
+class QuizSession(Base):
+    """
+    One quiz per trip. Created when the user reaches the end-of-trip quiz.
+    Anti re-entry is enforced by the unique trip_id: once a session exists for a
+    trip, the user can never start it again (so quitting forfeits earned gems).
+    """
+    __tablename__ = "quiz_sessions"
+    __table_args__ = (UniqueConstraint("trip_id", name="uq_quiz_session_trip"),)
+
+    id            = Column(Integer, primary_key=True, index=True)
+    user_id       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    trip_id       = Column(Integer, ForeignKey("trips.id", ondelete="SET NULL"), nullable=True)
+    site_id       = Column(Integer, ForeignKey("heritage_sites.id", ondelete="CASCADE"), nullable=False)
+    status        = Column(String(20), nullable=False, default="active")   # active | completed | abandoned
+    num_questions = Column(Integer, default=0)
+    gems_earned   = Column(Integer, default=0)              # provisional until completed; 0 if abandoned
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at  = Column(DateTime(timezone=True), nullable=True)
+
+    questions = relationship("QuizQuestion", back_populates="session", cascade="all, delete-orphan")
+
+
+class QuizQuestion(Base):
+    """A single MCQ in a quiz session. `correct_index` never leaves the server."""
+    __tablename__ = "quiz_questions"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    session_id    = Column(Integer, ForeignKey("quiz_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    idx           = Column(Integer, nullable=False)         # 0-based order within the session
+    question      = Column(Text, nullable=False)
+    options       = Column(ARRAY(String), nullable=False)
+    correct_index = Column(SmallInteger, nullable=False)
+    source_node_id = Column(Integer, nullable=True)
+    answered      = Column(Boolean, default=False)
+    selected_index = Column(SmallInteger, nullable=True)
+    seconds_taken = Column(Float, nullable=True)
+    is_correct    = Column(Boolean, default=False)
+    gems_awarded  = Column(Integer, default=0)
+
+    session = relationship("QuizSession", back_populates="questions")
+
+
+# ── Gamification: coupon store ──────────────────────────────────────────────────
+
+class UserCoupon(Base):
+    """
+    A coupon a user bought with gems via the spin-wheel store. Bound to a partner
+    (a hotel/restaurant Recommendation). Deadline (`expires_at`) is derived from
+    the user's distance to the partner at purchase time.
+    """
+    __tablename__ = "user_coupons"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    user_id        = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    recommendation_id = Column(Integer, ForeignKey("recommendations.id", ondelete="SET NULL"), nullable=True)
+    partner_name   = Column(String(255), nullable=False)
+    partner_type   = Column(String(50), nullable=False)    # hotel | restaurant
+    partner_lat    = Column(Float, nullable=True)
+    partner_lng    = Column(Float, nullable=True)
+    site_id        = Column(Integer, ForeignKey("heritage_sites.id", ondelete="SET NULL"), nullable=True)
+    tier           = Column(String(20), nullable=False)    # ultimate | special | normal
+    discount_pct   = Column(Integer, nullable=False)
+    gems_spent     = Column(Integer, nullable=False)
+    code           = Column(String(20), unique=True, nullable=False)
+    status         = Column(String(20), nullable=False, default="active")  # active | redeemed | expired
+    distance_meters = Column(Float, nullable=True)
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at     = Column(DateTime(timezone=True), nullable=False)
+
+
+# ── Gamification: bonus "Bingo" challenge ────────────────────────────────────────
+
+class BonusChallenge(Base):
+    """
+    A surprise location challenge: reach + scan target_node within the deadline
+    to unlock a single random minigame. Solving it awards 100-200 bonus gems.
+    """
+    __tablename__ = "bonus_challenges"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    user_id        = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id        = Column(Integer, ForeignKey("heritage_sites.id", ondelete="CASCADE"), nullable=False)
+    target_node_id = Column(Integer, ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False)
+    minigame       = Column(String(30), nullable=False)   # zip | sudoku
+    reward_gems    = Column(Integer, nullable=False)       # pre-rolled 100-200
+    status         = Column(String(20), nullable=False, default="offered")  # offered | reached | completed | expired
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at     = Column(DateTime(timezone=True), nullable=False)
+    completed_at   = Column(DateTime(timezone=True), nullable=True)

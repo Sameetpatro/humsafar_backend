@@ -426,3 +426,143 @@ class AmenityResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ── Gamification: gems wallet ────────────────────────────────────────────────────
+
+class GemTransactionItem(BaseModel):
+    delta:         int
+    reason:        str
+    balance_after: int
+    created_at:    datetime
+
+    class Config:
+        from_attributes = True
+
+
+class GemBalanceResponse(BaseModel):
+    gems:    int
+    history: List[GemTransactionItem] = []
+
+
+# ── Gamification: final quiz ─────────────────────────────────────────────────────
+
+class QuizQuestionPublic(BaseModel):
+    question_id: int
+    idx:         int
+    question:    str
+    options:     List[str]
+    answered:    bool = False
+
+
+class QuizStartResponse(BaseModel):
+    session_id:        int
+    status:            str               # active | completed | abandoned
+    seconds_per_question: int = 10
+    total_questions:   int
+    gems_earned:       int = 0
+    questions:         List[QuizQuestionPublic] = []
+    already_played:    bool = False      # true if a session already existed for the trip
+
+
+class QuizAnswerRequest(BaseModel):
+    session_id:     int
+    question_id:    int
+    selected_index: int
+    seconds_taken:  float
+
+
+class QuizAnswerResponse(BaseModel):
+    correct:        bool
+    correct_index:  int
+    gems_awarded:   int
+    running_total:  int
+
+
+class QuizCompleteRequest(BaseModel):
+    session_id: int
+
+
+class QuizCompleteResponse(BaseModel):
+    status:        str
+    gems_earned:   int
+    new_balance:   int
+
+
+class QuizAbandonRequest(BaseModel):
+    session_id: int
+
+
+# ── Gamification: coupon store ───────────────────────────────────────────────────
+
+class StorePartner(BaseModel):
+    id:              int
+    name:            str
+    type:            str
+    description:     Optional[str]   = None
+    latitude:        Optional[float] = None
+    longitude:       Optional[float] = None
+    distance_meters: Optional[float] = None
+
+
+class CouponPurchaseRequest(BaseModel):
+    firebase_uid: str
+    tier:         str               # ultimate | special | normal
+    partner_kind: str               # hotel | restaurant
+    site_id:      Optional[int] = None
+    user_lat:     Optional[float] = None
+    user_lng:     Optional[float] = None
+
+
+class CouponResponse(BaseModel):
+    id:              int
+    partner_name:    str
+    partner_type:    str
+    partner_lat:     Optional[float] = None
+    partner_lng:     Optional[float] = None
+    tier:            str
+    discount_pct:    int
+    gems_spent:      int
+    code:            str
+    status:          str
+    distance_meters: Optional[float] = None
+    created_at:      datetime
+    expires_at:      datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CouponPurchaseResponse(BaseModel):
+    coupon:      CouponResponse
+    new_balance: int
+
+
+# ── Gamification: bonus "Bingo" challenge ────────────────────────────────────────
+
+class BonusOfferRequest(BaseModel):
+    firebase_uid: str
+    site_id:      int
+    exclude_node_id: Optional[int] = None   # last scanned node (still eligible, but prefer variety)
+
+
+class BonusOfferResponse(BaseModel):
+    challenge_id:    int
+    target_node_id:  int
+    target_node_name: str
+    minigame:        str               # zip | sudoku
+    deadline_minutes: int
+    expires_at:      datetime
+
+
+class BonusCompleteRequest(BaseModel):
+    firebase_uid: str
+    challenge_id: int
+    scanned_node_id: int
+    solved:       bool
+
+
+class BonusCompleteResponse(BaseModel):
+    status:      str               # completed | expired | wrong_node | not_solved
+    reward_gems: int = 0
+    new_balance: int = 0
