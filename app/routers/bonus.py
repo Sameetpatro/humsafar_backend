@@ -72,7 +72,9 @@ def offer_bonus(req: BonusOfferRequest, db: Session = Depends(get_db)):
         challenge_id=challenge.id,
         target_node_id=target.id,
         target_node_name=target.name,
+        site_name=site.name,
         minigame=challenge.minigame,
+        reward_gems=challenge.reward_gems,
         deadline_minutes=minutes,
         expires_at=challenge.expires_at,
     )

@@ -550,7 +550,9 @@ class BonusOfferResponse(BaseModel):
     challenge_id:    int
     target_node_id:  int
     target_node_name: str
+    site_name:       str
     minigame:        str               # zip | sudoku
+    reward_gems:     int               # pre-rolled 100-200
     deadline_minutes: int
     expires_at:      datetime
 
