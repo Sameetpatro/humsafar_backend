@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 MIN_QUESTIONS = 5
 MAX_QUESTIONS = 8
+QUESTIONS_PER_NODE = 7
 
 
 def _node_context(db: Session, node: Node) -> str:
@@ -159,3 +160,51 @@ async def generate_quiz(db: Session, site: HeritageSite, nodes: List[Node]) -> L
             questions += _fallback_questions(site, nodes)
 
     return questions[:MAX_QUESTIONS]
+
+
+async def generate_questions_for_node(
+    db: Session,
+    site: HeritageSite,
+    node: Node,
+    count: int = QUESTIONS_PER_NODE,
+) -> List[dict]:
+    """
+    Generate up to [count] MCQs focused on a single visited node.
+    Falls back to template questions if the LLM fails.
+    """
+    source_text = _build_source_text(db, site, [node])
+    system_prompt = (
+        "You are a quiz master for a heritage tourism app. Using ONLY the heritage "
+        "context provided, write engaging multiple-choice questions about ONE specific "
+        "spot the visitor just explored. Each question has exactly 4 options with exactly "
+        "one correct answer. Keep questions concise and factual. Return STRICT JSON: an "
+        "array of objects with keys \"question\" (string), \"options\" (array of 4 strings), "
+        "\"correct_index\" (0-3 integer), and \"source_node_id\" (integer). "
+        "Do not include any text outside the JSON array."
+    )
+    user_prompt = (
+        f"Create {count} multiple-choice questions about this spot only.\n\n"
+        f"node_id={node.id}: {node.name}\n\n"
+        f"Heritage context:\n------------------\n{source_text}\n------------------"
+    )
+    questions: List[dict] = []
+    try:
+        reply = await call_openrouter([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ])
+        items = _coerce_json(reply)
+        questions = _normalize(items, [node])
+    except Exception as exc:
+        logger.warning(f"[quizgen] per-node generation failed for node {node.id}: {exc}")
+
+    if len(questions) < count:
+        fb = _fallback_questions(site, [node])
+        seen = {q["question"] for q in questions}
+        for q in fb:
+            if q["question"] not in seen:
+                questions.append(q)
+            if len(questions) >= count:
+                break
+
+    return questions[:count]

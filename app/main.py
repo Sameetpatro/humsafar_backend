@@ -12,7 +12,7 @@ from sqlalchemy import text
 from app.database import engine, Base
 from app.routers import sites, trips, chat, voice, admin, reviews, amenities
 from app.routers import users, community, stats, insights
-from app.routers import gems, quiz, store, bonus
+from app.routers import gems, quiz, store, bonus, instants
 
 # Create all tables (new tables: users, node_ratings, node_comments,
 # site_feedback, user_chat_history are created automatically here)
@@ -33,6 +33,9 @@ def _run_inplace_migrations() -> None:
         # Gamification: gems wallet balance on users
         """ALTER TABLE users
            ADD COLUMN IF NOT EXISTS gems INTEGER NOT NULL DEFAULT 0""",
+        # Node instants: photographer name snapshot at upload
+        """ALTER TABLE node_instants
+           ADD COLUMN IF NOT EXISTS photographer_name VARCHAR(255)""",
     ]
     with engine.begin() as conn:
         for stmt in statements:
@@ -82,6 +85,7 @@ app.include_router(gems.router)
 app.include_router(quiz.router)
 app.include_router(store.router)
 app.include_router(bonus.router)
+app.include_router(instants.router)
 
 # Admin / seeding
 app.include_router(admin.router)

@@ -457,12 +457,23 @@ class QuizQuestionPublic(BaseModel):
 
 class QuizStartResponse(BaseModel):
     session_id:        int
-    status:            str               # active | completed | abandoned
+    status:            str               # preparing | active | completed | abandoned
     seconds_per_question: int = 10
     total_questions:   int
     gems_earned:       int = 0
     questions:         List[QuizQuestionPublic] = []
     already_played:    bool = False      # true if a session already existed for the trip
+
+
+class QuizPrepareRequest(BaseModel):
+    node_ids: List[int]
+
+
+class QuizPrepareResponse(BaseModel):
+    session_id:      int
+    status:          str
+    total_questions: int
+    nodes_prepared:  int
 
 
 class QuizAnswerRequest(BaseModel):
@@ -568,3 +579,38 @@ class BonusCompleteResponse(BaseModel):
     status:      str               # completed | expired | wrong_node | not_solved
     reward_gems: int = 0
     new_balance: int = 0
+
+
+# ── Node Instants ─────────────────────────────────────────────────────────────
+
+class NodeInstantCreate(BaseModel):
+    firebase_uid: str
+    site_id:      int
+    node_id:      int
+    media_url:    str
+    media_type:   str = "image"    # image | video
+    caption:      Optional[str] = None
+
+
+class NodeInstantResponse(BaseModel):
+    id:           int
+    user_id:      UUID
+    site_id:      int
+    node_id:      int
+    media_url:    str
+    media_type:   str
+    caption:      Optional[str] = None
+    like_count:   int = 0
+    created_at:   datetime
+    display_name: Optional[str] = None
+    avatar_url:   Optional[str] = None
+    liked_by_me:  bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class NodeInstantLikeResponse(BaseModel):
+    instant_id:  int
+    liked:       bool
+    like_count:  int

@@ -449,7 +449,7 @@ class QuizSession(Base):
     user_id       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     trip_id       = Column(Integer, ForeignKey("trips.id", ondelete="SET NULL"), nullable=True)
     site_id       = Column(Integer, ForeignKey("heritage_sites.id", ondelete="CASCADE"), nullable=False)
-    status        = Column(String(20), nullable=False, default="active")   # active | completed | abandoned
+    status        = Column(String(20), nullable=False, default="active")   # preparing | active | completed | abandoned
     num_questions = Column(Integer, default=0)
     gems_earned   = Column(Integer, default=0)              # provisional until completed; 0 if abandoned
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
@@ -525,3 +525,43 @@ class BonusChallenge(Base):
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
     expires_at     = Column(DateTime(timezone=True), nullable=False)
     completed_at   = Column(DateTime(timezone=True), nullable=True)
+
+
+# ── Community: Node Instants (Instagram-style UGC per node) ─────────────────
+
+class NodeInstant(Base):
+    """
+    User-submitted photo/video moment at a heritage node.
+    Ranked by like_count for the top-50 featured feed per node.
+    Auto-deleted after 34 hours or when outside the top 50 for that node.
+    media_url is a Firebase Storage (or CDN) URL uploaded by the client.
+    """
+    __tablename__ = "node_instants"
+    __table_args__ = (
+        Index("ix_node_instants_node_rank", "node_id", "like_count", "created_at"),
+    )
+
+    id          = Column(Integer, primary_key=True, index=True)
+    user_id     = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    site_id     = Column(Integer, ForeignKey("heritage_sites.id", ondelete="CASCADE"), nullable=False)
+    node_id     = Column(Integer, ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False, index=True)
+    media_url   = Column(Text, nullable=False)
+    media_type  = Column(String(20), nullable=False, default="image")   # image | video
+    caption     = Column(Text, nullable=True)
+    like_count  = Column(Integer, default=0, nullable=False, server_default=text("0"))
+    is_flagged  = Column(Boolean, default=False)
+    photographer_name = Column(String(255), nullable=True)   # snapshot at upload time
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class NodeInstantLike(Base):
+    """One like per user per instant — toggled via POST /instants/{id}/like."""
+    __tablename__ = "node_instant_likes"
+    __table_args__ = (
+        UniqueConstraint("instant_id", "user_id", name="uq_node_instant_like"),
+    )
+
+    id         = Column(Integer, primary_key=True, index=True)
+    instant_id = Column(Integer, ForeignKey("node_instants.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id    = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
