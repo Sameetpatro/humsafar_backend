@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.database import get_db
 from app.models import Node, HeritageSite, BonusChallenge
@@ -18,6 +19,7 @@ from app.schemas import (
     BonusOfferResponse,
     BonusCompleteRequest,
     BonusCompleteResponse,
+    BonusSiteStatus,
 )
 from app.services import gems
 
@@ -26,6 +28,7 @@ router = APIRouter(prefix="/bonus", tags=["Bonus"])
 MINIGAMES = ["zip", "sudoku"]
 DEADLINE_CHOICES = [20, 30, 35]   # minutes
 REWARD_MIN, REWARD_MAX = 100, 200
+AVAILABLE_AFTER_MINUTES = 1
 
 
 @router.post("/offer", response_model=BonusOfferResponse)
@@ -40,18 +43,55 @@ def offer_bonus(req: BonusOfferRequest, db: Session = Depends(get_db)):
     if not nodes:
         raise HTTPException(status_code=400, detail="Site has no nodes")
 
+    # One minigame per site per user. Once completed, never offer again.
+    already = db.query(BonusChallenge).filter(
+        BonusChallenge.user_id == user_uuid,
+        BonusChallenge.site_id == req.site_id,
+        BonusChallenge.status == "completed",
+    ).first()
+    if already:
+        raise HTTPException(status_code=409, detail="Mini game already played for this site")
+
+    # If there's an active offer for this site, return it (idempotent).
+    active = db.query(BonusChallenge).filter(
+        BonusChallenge.user_id == user_uuid,
+        BonusChallenge.site_id == req.site_id,
+        BonusChallenge.status.in_(["offered", "reached"]),
+    ).order_by(BonusChallenge.created_at.desc()).first()
+    now = datetime.now(timezone.utc)
+    if active:
+        exp = active.expires_at
+        if exp and exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp and now <= exp:
+            remaining = max(1, int((exp - now).total_seconds() / 60))
+            return BonusOfferResponse(
+                challenge_id=active.id,
+                target_node_id=active.target_node_id,
+                target_node_name=db.query(Node).filter(Node.id == active.target_node_id).first().name,
+                site_name=site.name,
+                minigame=active.minigame,
+                reward_gems=active.reward_gems,
+                deadline_minutes=remaining,
+                expires_at=active.expires_at,
+            )
+        # Expired offer lingering in DB → mark expired so a new one can be created.
+        if exp and now > exp:
+            active.status = "expired"
+            db.commit()
+
     # Prefer a node other than the one the user is standing at, for variety.
     pool = [n for n in nodes if n.id != req.exclude_node_id] or nodes
     target = random.choice(pool)
 
     minutes = random.choice(DEADLINE_CHOICES)
     reward = random.randint(REWARD_MIN, REWARD_MAX)
-    now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=minutes)
 
-    # Expire any still-open offers so only one is active at a time.
+    # Expire any still-open offers for THIS site so only one is active at a time.
     db.query(BonusChallenge).filter(
         BonusChallenge.user_id == user_uuid,
+        BonusChallenge.site_id == req.site_id,
         BonusChallenge.status.in_(["offered", "reached"]),
     ).update({BonusChallenge.status: "expired"}, synchronize_session=False)
 
@@ -127,3 +167,53 @@ def complete_bonus(req: BonusCompleteRequest, db: Session = Depends(get_db)):
     db.commit()
     return BonusCompleteResponse(status="completed", reward_gems=challenge.reward_gems,
                                  new_balance=new_balance)
+
+
+@router.get("/status/{firebase_uid}", response_model=list[BonusSiteStatus])
+def bonus_status(firebase_uid: str, db: Session = Depends(get_db)):
+    """
+    Per-site minigame status for a user (Profile screen).
+    We only return sites the user has visited at least once.
+    """
+    user_uuid = get_user_uuid(firebase_uid, db)
+
+    site_rows = db.execute(
+        text("""
+            SELECT DISTINCT site_id, site_name
+            FROM user_visit_history
+            WHERE user_id = :uid
+            ORDER BY site_name ASC
+        """),
+        {"uid": str(user_uuid)},
+    ).fetchall()
+
+    results: list[BonusSiteStatus] = []
+    for site_id, site_name in site_rows:
+        latest = (
+            db.query(BonusChallenge)
+            .filter(BonusChallenge.user_id == user_uuid, BonusChallenge.site_id == site_id)
+            .order_by(BonusChallenge.created_at.desc())
+            .first()
+        )
+        if latest and latest.status == "completed":
+            results.append(BonusSiteStatus(
+                site_id=site_id,
+                site_name=site_name,
+                played=True,
+                reward_gems=latest.reward_gems,
+                status=latest.status,
+                completed_at=latest.completed_at,
+                available_after_minutes=0,
+            ))
+        else:
+            results.append(BonusSiteStatus(
+                site_id=site_id,
+                site_name=site_name,
+                played=False,
+                reward_gems=0,
+                status=latest.status if latest else None,
+                completed_at=None,
+                available_after_minutes=AVAILABLE_AFTER_MINUTES,
+            ))
+
+    return results

@@ -581,6 +581,16 @@ class BonusCompleteResponse(BaseModel):
     new_balance: int = 0
 
 
+class BonusSiteStatus(BaseModel):
+    site_id: int
+    site_name: str
+    played: bool
+    reward_gems: int = 0
+    status: Optional[str] = None      # completed | offered | reached | expired | None
+    completed_at: Optional[datetime] = None
+    available_after_minutes: int = 0
+
+
 # ── Node Instants ─────────────────────────────────────────────────────────────
 
 class NodeInstantCreate(BaseModel):

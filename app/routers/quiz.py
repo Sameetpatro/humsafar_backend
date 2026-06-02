@@ -183,6 +183,28 @@ async def start_quiz(firebase_uid: str, trip_id: int, db: Session = Depends(get_
     if not trip:
         raise HTTPException(status_code=404, detail=f"Trip {trip_id} not found")
 
+    # NEW: One quiz per site per user. If the user has already completed/abandoned
+    # any quiz at this site (even from a previous trip), block replay.
+    prior_site_session = (
+        db.query(QuizSession)
+        .filter(
+            QuizSession.user_id == user_uuid,
+            QuizSession.site_id == trip.site_id,
+            QuizSession.status.in_(("completed", "abandoned")),
+        )
+        .order_by(QuizSession.completed_at.desc().nullslast(), QuizSession.id.desc())
+        .first()
+    )
+    if prior_site_session:
+        return QuizStartResponse(
+            session_id=prior_site_session.id,
+            status=prior_site_session.status,
+            total_questions=prior_site_session.num_questions or 0,
+            gems_earned=prior_site_session.gems_earned or 0,
+            questions=[],
+            already_played=True,
+        )
+
     existing = db.query(QuizSession).filter(QuizSession.trip_id == trip_id).first()
     if existing:
         if existing.status in ("completed", "abandoned"):
